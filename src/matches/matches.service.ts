@@ -34,10 +34,13 @@ export class MatchesService {
       ...(groupName && { groupName }),
     };
 
-    const [data, total] = await this.prisma.$transaction([
+    // Parallel (not $transaction) to avoid BEGIN/COMMIT round trips; join strategy
+    // collapses the relation loads into a single query each (cross-region latency).
+    const [data, total] = await Promise.all([
       this.prisma.match.findMany({
         where,
         include: MATCH_INCLUDE,
+        relationLoadStrategy: 'join',
         orderBy: [{ matchNumber: 'asc' }, { kickoffAt: 'asc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -52,6 +55,7 @@ export class MatchesService {
     const match = await this.prisma.match.findUnique({
       where: { id },
       include: MATCH_INCLUDE,
+      relationLoadStrategy: 'join',
     });
     if (!match) {
       throw new NotFoundException({

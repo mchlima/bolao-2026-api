@@ -19,7 +19,7 @@ export class TournamentsService {
       ...(search && { name: { contains: search, mode: 'insensitive' } }),
     };
 
-    const [data, total] = await this.prisma.$transaction([
+    const [data, total] = await Promise.all([
       this.prisma.tournament.findMany({
         where,
         orderBy: { startDate: 'desc' },

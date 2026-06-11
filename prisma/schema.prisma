@@ -2,7 +2,10 @@
 // Convention: ALL identifiers in English. UI text (pt-BR) lives in the frontend.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  // Collapse relation loads into a single LATERAL JOIN query (one round trip)
+  // instead of N separate queries — important while the DB is cross-region.
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {

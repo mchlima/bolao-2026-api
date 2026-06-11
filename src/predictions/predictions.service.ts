@@ -70,6 +70,7 @@ export class PredictionsService {
     const predictions = await this.prisma.prediction.findMany({
       where: { userId, ...(tournamentId && { match: { tournamentId } }) },
       include: PREDICTION_INCLUDE,
+      relationLoadStrategy: 'join',
       orderBy: { match: { kickoffAt: 'asc' } },
     });
     return predictions.map((p) => this.withScore(p));
@@ -82,6 +83,7 @@ export class PredictionsService {
     const prediction = await this.prisma.prediction.findUnique({
       where: { userId_matchId: { userId, matchId } },
       include: PREDICTION_INCLUDE,
+      relationLoadStrategy: 'join',
     });
     if (!prediction) {
       throw new NotFoundException({
