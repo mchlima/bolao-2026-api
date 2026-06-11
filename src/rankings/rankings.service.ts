@@ -66,20 +66,19 @@ export class RankingsService {
       });
     }
 
-    // Matches with a usable result (LIVE or FINISHED, scores set; CANCELLED excluded).
+    // LIVE or FINISHED matches contribute a scoreline (CANCELLED excluded); a
+    // null side counts as 0, so provisional live points reflect e.g. 1-0.
     const matches = await this.prisma.match.findMany({
       where: {
         tournamentId,
         status: { in: ['LIVE', 'FINISHED'] },
-        homeScore: { not: null },
-        awayScore: { not: null },
       },
       select: { id: true, homeScore: true, awayScore: true },
     });
     const resultByMatch = new Map(
       matches.map((m) => [
         m.id,
-        { home: m.homeScore as number, away: m.awayScore as number },
+        { home: m.homeScore ?? 0, away: m.awayScore ?? 0 },
       ]),
     );
 
@@ -132,12 +131,11 @@ export class RankingsService {
       });
     }
 
-    const hasResult =
-      match.status !== 'CANCELLED' &&
-      match.homeScore != null &&
-      match.awayScore != null;
-    const result = hasResult
-      ? { home: match.homeScore as number, away: match.awayScore as number }
+    // LIVE or FINISHED matches have a scoreline; a null side counts as 0 (e.g.
+    // 1-0 while the away score is still untouched). Provisional during LIVE.
+    const playing = match.status === 'LIVE' || match.status === 'FINISHED';
+    const result = playing
+      ? { home: match.homeScore ?? 0, away: match.awayScore ?? 0 }
       : null;
 
     const predictions = await this.prisma.prediction.findMany({
