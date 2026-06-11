@@ -118,7 +118,13 @@ export class LiveIngestService {
     }
   }
 
-  /** Link an ESPN event to a local match by stored id, else by date + both team codes. */
+  /**
+   * Link an ESPN event to a local match: by stored id first, else by BOTH team
+   * codes — a fixture's home+away pair is unique in the tournament. The kickoff
+   * instant is only a tiebreaker for the (essentially impossible) case of the
+   * same pair appearing twice in the feed. Matching by team pair + instant,
+   * NEVER by local calendar day, avoids the midnight-UTC boundary bug.
+   */
   private findEvent(
     events: EspnEvent[],
     m: {
@@ -135,12 +141,16 @@ export class LiveIngestService {
     const home = m.homeTeam?.shortName;
     const away = m.awayTeam?.shortName;
     if (!home || !away) return undefined;
-    const day = m.kickoffAt.toISOString().slice(0, 10);
-    return events.find(
-      (e) =>
-        e.dateIso.slice(0, 10) === day &&
-        e.abbrs.includes(home) &&
-        e.abbrs.includes(away),
+    const pairMatches = events.filter(
+      (e) => e.abbrs.includes(home) && e.abbrs.includes(away),
+    );
+    if (pairMatches.length <= 1) return pairMatches[0];
+    const kickoff = m.kickoffAt.getTime();
+    return pairMatches.reduce((best, e) =>
+      Math.abs(new Date(e.dateIso).getTime() - kickoff) <
+      Math.abs(new Date(best.dateIso).getTime() - kickoff)
+        ? e
+        : best,
     );
   }
 }
