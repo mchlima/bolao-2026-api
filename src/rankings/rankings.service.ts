@@ -1,0 +1,245 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { ScoringService } from '../scoring/scoring.service';
+
+export interface RankingEntry {
+  rank: number;
+  user: { id: string; name: string };
+  points: number;
+  exactCount: number; // tiebreak / info
+  scoredCount: number; // predictions that already counted (match had a result)
+}
+
+export interface RankingResponse {
+  entries: RankingEntry[]; // top 100
+  currentUser: RankingEntry | null; // logged user's row (even if outside top 100)
+  totalParticipants: number;
+}
+
+export interface MatchRankingResponse extends RankingResponse {
+  provisional: boolean; // true while the match is LIVE
+  result: { home: number; away: number } | null;
+}
+
+export interface EngagementResponse {
+  matchId: string;
+  totalPredictions: number;
+  distribution: Array<{
+    homeScore: number;
+    awayScore: number;
+    count: number;
+    percentage: number; // 0–100, one decimal
+  }>;
+}
+
+interface Acc {
+  user: { id: string; name: string };
+  points: number;
+  exact: number;
+  scored: number;
+}
+
+@Injectable()
+export class RankingsService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly scoring: ScoringService,
+  ) {}
+
+  async tournamentRanking(
+    tournamentId: string,
+    currentUserId?: string,
+  ): Promise<RankingResponse> {
+    const tournament = await this.prisma.tournament.findUnique({
+      where: { id: tournamentId },
+      select: { id: true },
+    });
+    if (!tournament) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Torneio não encontrado.',
+      });
+    }
+
+    // Matches with a usable result (LIVE or FINISHED, scores set; CANCELLED excluded).
+    const matches = await this.prisma.match.findMany({
+      where: {
+        tournamentId,
+        status: { in: ['LIVE', 'FINISHED'] },
+        homeScore: { not: null },
+        awayScore: { not: null },
+      },
+      select: { id: true, homeScore: true, awayScore: true },
+    });
+    const resultByMatch = new Map(
+      matches.map((m) => [
+        m.id,
+        { home: m.homeScore as number, away: m.awayScore as number },
+      ]),
+    );
+
+    const predictions = await this.prisma.prediction.findMany({
+      where: { match: { tournamentId } },
+      select: {
+        userId: true,
+        matchId: true,
+        homeScore: true,
+        awayScore: true,
+        user: { select: { id: true, name: true, isActive: true } },
+      },
+    });
+
+    const acc = new Map<string, Acc>();
+    for (const p of predictions) {
+      if (!p.user.isActive) continue;
+      let a = acc.get(p.userId);
+      if (!a) {
+        a = { user: { id: p.user.id, name: p.user.name }, points: 0, exact: 0, scored: 0 };
+        acc.set(p.userId, a);
+      }
+      const result = resultByMatch.get(p.matchId);
+      if (result) {
+        const s = this.scoring.score(
+          { home: p.homeScore, away: p.awayScore },
+          result,
+        );
+        a.points += s.points;
+        a.scored += 1;
+        if (s.tier === 'EXACT') a.exact += 1;
+      }
+    }
+
+    return this.buildResponse([...acc.values()], currentUserId);
+  }
+
+  async matchRanking(
+    matchId: string,
+    currentUserId?: string,
+  ): Promise<MatchRankingResponse> {
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      select: { id: true, status: true, homeScore: true, awayScore: true },
+    });
+    if (!match) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Partida não encontrada.',
+      });
+    }
+
+    const hasResult =
+      match.status !== 'CANCELLED' &&
+      match.homeScore != null &&
+      match.awayScore != null;
+    const result = hasResult
+      ? { home: match.homeScore as number, away: match.awayScore as number }
+      : null;
+
+    const predictions = await this.prisma.prediction.findMany({
+      where: { matchId },
+      select: {
+        userId: true,
+        homeScore: true,
+        awayScore: true,
+        user: { select: { id: true, name: true, isActive: true } },
+      },
+    });
+
+    const entries: Acc[] = [];
+    for (const p of predictions) {
+      if (!p.user.isActive) continue;
+      const a: Acc = {
+        user: { id: p.user.id, name: p.user.name },
+        points: 0,
+        exact: 0,
+        scored: 0,
+      };
+      if (result) {
+        const s = this.scoring.score(
+          { home: p.homeScore, away: p.awayScore },
+          result,
+        );
+        a.points = s.points;
+        a.scored = 1;
+        if (s.tier === 'EXACT') a.exact = 1;
+      }
+      entries.push(a);
+    }
+
+    return {
+      ...this.buildResponse(entries, currentUserId),
+      provisional: match.status === 'LIVE',
+      result,
+    };
+  }
+
+  async engagement(matchId: string): Promise<EngagementResponse> {
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      select: { id: true },
+    });
+    if (!match) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Partida não encontrada.',
+      });
+    }
+
+    const groups = await this.prisma.prediction.groupBy({
+      by: ['homeScore', 'awayScore'],
+      where: { matchId },
+      _count: { _all: true },
+    });
+    const total = groups.reduce((sum, g) => sum + g._count._all, 0);
+
+    const distribution = groups
+      .map((g) => ({
+        homeScore: g.homeScore,
+        awayScore: g.awayScore,
+        count: g._count._all,
+        percentage: total
+          ? Math.round((g._count._all / total) * 1000) / 10
+          : 0,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    return { matchId, totalPredictions: total, distribution };
+  }
+
+  /** Sort, assign tie-aware ranks, take top 100, and locate the current user. */
+  private buildResponse(
+    accs: Acc[],
+    currentUserId?: string,
+  ): RankingResponse {
+    accs.sort(
+      (a, b) =>
+        b.points - a.points ||
+        b.exact - a.exact ||
+        a.user.name.localeCompare(b.user.name),
+    );
+
+    const ranked: RankingEntry[] = [];
+    for (let i = 0; i < accs.length; i++) {
+      const a = accs[i];
+      // Ties (same points) share a rank.
+      const rank =
+        i > 0 && accs[i - 1].points === a.points ? ranked[i - 1].rank : i + 1;
+      ranked.push({
+        rank,
+        user: a.user,
+        points: a.points,
+        exactCount: a.exact,
+        scoredCount: a.scored,
+      });
+    }
+
+    return {
+      entries: ranked.slice(0, 100),
+      currentUser:
+        (currentUserId &&
+          ranked.find((e) => e.user.id === currentUserId)) ||
+        null,
+      totalParticipants: ranked.length,
+    };
+  }
+}

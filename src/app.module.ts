@@ -12,6 +12,7 @@ import { TournamentsModule } from './tournaments/tournaments.module';
 import { MatchesModule } from './matches/matches.module';
 import { ScoringModule } from './scoring/scoring.module';
 import { PredictionsModule } from './predictions/predictions.module';
+import { RankingsModule } from './rankings/rankings.module';
 
 @Module({
   imports: [
@@ -26,8 +27,9 @@ import { PredictionsModule } from './predictions/predictions.module';
     TournamentsModule,
     MatchesModule,
     PredictionsModule,
-    // Remaining feature modules added per build step (rankings + engagement,
-    // admin dashboard/live control) — see docs §6.
+    RankingsModule,
+    // Remaining feature modules added per build step (admin dashboard/live
+    // control, audit log) — see docs §6.
   ],
   controllers: [AppController],
   providers: [AppService],
