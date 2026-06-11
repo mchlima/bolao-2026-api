@@ -9,9 +9,11 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import type { SafeUser } from '../users/user.types';
 import { CreateMatchDto } from './dto/create-match.dto';
 import { UpdateMatchDto } from './dto/update-match.dto';
 import { MatchesService, MatchWithRelations } from './matches.service';
@@ -31,8 +33,9 @@ export class AdminMatchesController {
   update(
     @Param('id') id: string,
     @Body() dto: UpdateMatchDto,
+    @CurrentUser() admin: SafeUser,
   ): Promise<MatchWithRelations> {
-    return this.matches.update(id, dto);
+    return this.matches.update(id, dto, admin.id);
   }
 
   @Delete(':id')

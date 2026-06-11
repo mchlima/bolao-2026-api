@@ -13,12 +13,15 @@ import { MatchesModule } from './matches/matches.module';
 import { ScoringModule } from './scoring/scoring.module';
 import { PredictionsModule } from './predictions/predictions.module';
 import { RankingsModule } from './rankings/rankings.module';
+import { AuditModule } from './audit/audit.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     ScoringModule,
+    AuditModule,
     HealthModule,
     UsersModule,
     AuthModule,
@@ -28,8 +31,7 @@ import { RankingsModule } from './rankings/rankings.module';
     MatchesModule,
     PredictionsModule,
     RankingsModule,
-    // Remaining feature modules added per build step (admin dashboard/live
-    // control, audit log) — see docs §6.
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [AppService],

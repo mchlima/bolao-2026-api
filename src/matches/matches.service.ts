@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
 import { Paginated, paginated } from '../common/pagination';
 import { CreateMatchDto } from './dto/create-match.dto';
 import { QueryMatchesDto } from './dto/query-matches.dto';
@@ -20,7 +21,10 @@ export type MatchWithRelations = Prisma.MatchGetPayload<{
 
 @Injectable()
 export class MatchesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   async findAll(query: QueryMatchesDto): Promise<Paginated<MatchWithRelations>> {
     const { page, pageSize, tournamentId, status, groupName } = query;
@@ -62,13 +66,39 @@ export class MatchesService {
     return this.prisma.match.create({ data: dto, include: MATCH_INCLUDE });
   }
 
-  async update(id: string, dto: UpdateMatchDto): Promise<MatchWithRelations> {
-    await this.findOne(id);
-    return this.prisma.match.update({
+  async update(
+    id: string,
+    dto: UpdateMatchDto,
+    actorUserId?: string,
+  ): Promise<MatchWithRelations> {
+    const before = await this.findOne(id);
+    const updated = await this.prisma.match.update({
       where: { id },
       data: dto,
       include: MATCH_INCLUDE,
     });
+
+    // Audit sensitive live-control changes (status / score) when an actor is known.
+    if (actorUserId) {
+      const diff: Record<string, { before: unknown; after: unknown }> = {};
+      if (dto.status !== undefined && before.status !== updated.status)
+        diff.status = { before: before.status, after: updated.status };
+      if (dto.homeScore !== undefined && before.homeScore !== updated.homeScore)
+        diff.homeScore = { before: before.homeScore, after: updated.homeScore };
+      if (dto.awayScore !== undefined && before.awayScore !== updated.awayScore)
+        diff.awayScore = { before: before.awayScore, after: updated.awayScore };
+
+      if (Object.keys(diff).length > 0) {
+        await this.audit.record({
+          actorUserId,
+          action: 'MATCH_UPDATE',
+          entityType: 'Match',
+          entityId: id,
+          diff,
+        });
+      }
+    }
+    return updated;
   }
 
   async remove(id: string): Promise<void> {
