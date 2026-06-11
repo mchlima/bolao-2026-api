@@ -53,6 +53,7 @@ model User {
   passwordHash String? // nullable: room for future social login
   role         UserRole @default(USER)
   isActive     Boolean  @default(true)
+  timezone     String   @default("America/Sao_Paulo") // IANA tz for displaying times
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

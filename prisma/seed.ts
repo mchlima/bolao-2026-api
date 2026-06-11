@@ -109,7 +109,11 @@ async function seedWorldCup(): Promise<void> {
     const stadiumId = stadiumByName.get(m.venue);
     if (!stadiumId) throw new Error(`Seed: stadium not found "${m.venue}"`);
     const offset = VENUE_UTC_OFFSET[m.venue] ?? '+00:00';
-    const kickoffAt = new Date(`${m.date}T${m.time}:00${offset}`);
+    // Research-derived local kickoff times were ~1h early (user-confirmed against the
+    // official schedule); shift +1h. Times remain best-effort (decision #14) — admin can fine-tune.
+    const kickoffAt = new Date(
+      new Date(`${m.date}T${m.time}:00${offset}`).getTime() + 60 * 60 * 1000,
+    );
 
     const matchData = {
       tournamentId: tournament.id,

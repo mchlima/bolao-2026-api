@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -64,6 +65,23 @@ export class AuthService {
       });
     }
     return this.buildResponse(user);
+  }
+
+  async updateMe(
+    userId: string,
+    dto: { timezone?: string },
+  ): Promise<SafeUser> {
+    if (dto.timezone) {
+      try {
+        new Intl.DateTimeFormat('en', { timeZone: dto.timezone });
+      } catch {
+        throw new BadRequestException({
+          code: 'INVALID_TIMEZONE',
+          message: 'Fuso horário inválido.',
+        });
+      }
+    }
+    return this.users.updateProfile(userId, { timezone: dto.timezone });
   }
 
   private buildResponse(user: User): AuthResponse {
