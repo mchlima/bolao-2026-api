@@ -6,6 +6,8 @@ import { PrismaModule } from './prisma/prisma.module';
 import { HealthModule } from './health/health.module';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
+import { TeamsModule } from './teams/teams.module';
+import { StadiumsModule } from './stadiums/stadiums.module';
 
 @Module({
   imports: [
@@ -14,8 +16,10 @@ import { AuthModule } from './auth/auth.module';
     HealthModule,
     UsersModule,
     AuthModule,
-    // Remaining feature modules added per build step (teams, stadiums,
-    // tournaments, matches, predictions, rankings, admin) — see docs §6.
+    TeamsModule,
+    StadiumsModule,
+    // Remaining feature modules added per build step (tournaments, matches,
+    // predictions, rankings, admin) — see docs §6.
   ],
   controllers: [AppController],
   providers: [AppService],
