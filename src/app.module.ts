@@ -16,10 +16,13 @@ import { RankingsModule } from './rankings/rankings.module';
 import { AuditModule } from './audit/audit.module';
 import { AdminModule } from './admin/admin.module';
 import { StorageModule } from './storage/storage.module';
+import { ScheduleModule } from '@nestjs/schedule';
+import { LiveIngestModule } from './live-ingest/live-ingest.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ScheduleModule.forRoot(),
     PrismaModule,
     ScoringModule,
     AuditModule,
@@ -34,6 +37,7 @@ import { StorageModule } from './storage/storage.module';
     PredictionsModule,
     RankingsModule,
     AdminModule,
+    LiveIngestModule,
   ],
   controllers: [AppController],
   providers: [AppService],

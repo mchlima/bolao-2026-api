@@ -138,6 +138,10 @@ model Match {
   // Manual override for the prediction window. NULL = follow the automatic rule
   // (open while SCHEDULED and before kickoff); true/false force open/closed.
   predictionsOpen Boolean?
+  // Auto score/lifecycle (ESPN robot). externalId links to the provider fixture;
+  // autoManaged false means the admin took over and the robot must skip it.
+  externalId  String?
+  autoManaged Boolean @default(true)
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 

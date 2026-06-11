@@ -74,4 +74,9 @@ export class UpdateMatchDto {
   @IsOptional()
   @IsBoolean()
   predictionsOpen?: boolean | null;
+
+  // false = admin took over score/status; the ESPN robot skips this match.
+  @IsOptional()
+  @IsBoolean()
+  autoManaged?: boolean;
 }
