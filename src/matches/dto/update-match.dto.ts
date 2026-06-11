@@ -1,6 +1,7 @@
 import { MatchStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsDate,
   IsEnum,
   IsInt,
@@ -67,4 +68,10 @@ export class UpdateMatchDto {
   @IsInt()
   @Min(1)
   matchNumber?: number;
+
+  // Manual prediction-window override: true/false force open/closed, null resets
+  // to the automatic rule. @IsOptional() lets null through to clear the override.
+  @IsOptional()
+  @IsBoolean()
+  predictionsOpen?: boolean | null;
 }

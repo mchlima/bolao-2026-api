@@ -94,7 +94,19 @@ export class PredictionsService {
     return this.withScore(prediction);
   }
 
-  /** A match accepts predictions only while it is SCHEDULED, before kickoff, with both teams set. */
+  /**
+   * Whether a match accepts predictions. The admin override (predictionsOpen)
+   * wins when set; otherwise the automatic rule applies (SCHEDULED + before
+   * kickoff). Terminal states (finished/cancelled) never accept predictions,
+   * even with the override on. Both teams must be set.
+   */
+  static acceptsPredictions(match: Match): boolean {
+    if (match.homeTeamId == null || match.awayTeamId == null) return false;
+    if (match.status === 'FINISHED' || match.status === 'CANCELLED') return false;
+    const auto = match.status === 'SCHEDULED' && new Date() < match.kickoffAt;
+    return match.predictionsOpen ?? auto;
+  }
+
   private assertOpenForPrediction(match: Match): void {
     if (match.homeTeamId == null || match.awayTeamId == null) {
       throw new ForbiddenException({
@@ -102,7 +114,7 @@ export class PredictionsService {
         message: 'A partida ainda não tem os dois times definidos.',
       });
     }
-    if (match.status !== 'SCHEDULED' || new Date() >= match.kickoffAt) {
+    if (!PredictionsService.acceptsPredictions(match)) {
       throw new ForbiddenException({
         code: 'PREDICTION_LOCKED',
         message: 'Palpites encerrados para esta partida.',

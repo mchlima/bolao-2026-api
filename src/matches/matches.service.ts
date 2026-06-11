@@ -91,6 +91,14 @@ export class MatchesService {
         diff.homeScore = { before: before.homeScore, after: updated.homeScore };
       if (dto.awayScore !== undefined && before.awayScore !== updated.awayScore)
         diff.awayScore = { before: before.awayScore, after: updated.awayScore };
+      if (
+        dto.predictionsOpen !== undefined &&
+        before.predictionsOpen !== updated.predictionsOpen
+      )
+        diff.predictionsOpen = {
+          before: before.predictionsOpen,
+          after: updated.predictionsOpen,
+        };
 
       if (Object.keys(diff).length > 0) {
         await this.audit.record({

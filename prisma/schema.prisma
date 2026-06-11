@@ -135,6 +135,9 @@ model Match {
   phaseLabel   String? // free text stage: "Fase de Grupos", "Oitavas de final"...
   groupName    String? // "A".."L" for the group stage
   matchNumber  Int? // official fixture number within the tournament (1..N)
+  // Manual override for the prediction window. NULL = follow the automatic rule
+  // (open while SCHEDULED and before kickoff); true/false force open/closed.
+  predictionsOpen Boolean?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 
