@@ -1,0 +1,20 @@
+# Bolão 2026 API — VPS deployment (Postgres is external: Supabase).
+services:
+  api:
+    build: .
+    image: bolao-2026-api:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      # internal:host — Nginx on the host proxies to this port
+      - "127.0.0.1:3000:3000"
+    # 2GB VPS: cap the container so it doesn't starve Nginx
+    mem_limit: 1g
+    mem_reservation: 512m
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s

@@ -1,0 +1,171 @@
+// Bolão 2026 — Prisma schema (source of truth: bolao-2026-docs/database/schema.md)
+// Convention: ALL identifiers in English. UI text (pt-BR) lives in the frontend.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // Pooler (6543, pgbouncer=true) for the runtime client.
+  url       = env("DATABASE_URL")
+  // Direct connection (5432) used ONLY by the Prisma CLI for migrate/introspect.
+  directUrl = env("DIRECT_URL")
+}
+
+// ─────────────────────────────────────────────────────────── Enums
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum TournamentStatus {
+  DRAFT
+  UPCOMING
+  ONGOING
+  FINISHED
+}
+
+enum TeamType {
+  NATIONAL_TEAM
+  CLUB
+}
+
+enum MatchStatus {
+  SCHEDULED
+  LIVE
+  FINISHED
+  CANCELLED
+}
+
+enum AuditActorType {
+  USER
+  SYSTEM
+}
+
+// ─────────────────────────────────────────────────────────── Models
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String? // nullable: room for future social login
+  role         UserRole @default(USER)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  predictions Prediction[]
+  auditLogs   AuditLog[]   @relation("AuditActor")
+
+  @@map("users")
+}
+
+model Tournament {
+  id        String           @id @default(cuid())
+  name      String
+  logoUrl   String?
+  startDate DateTime?
+  endDate   DateTime?
+  status    TournamentStatus @default(DRAFT)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  matches Match[]
+
+  @@map("tournaments")
+}
+
+model Team {
+  id        String   @id @default(cuid())
+  name      String
+  shortName String // sigla
+  type      TeamType
+  // NATIONAL_TEAM:
+  countryCode String? // ISO 3166-1 alpha-2 (drives country-flag-icons)
+  continent   String?
+  // CLUB:
+  country String?
+  logoUrl String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  homeMatches Match[] @relation("HomeTeam")
+  awayMatches Match[] @relation("AwayTeam")
+
+  @@map("teams")
+}
+
+model Stadium {
+  id        String   @id @default(cuid())
+  name      String
+  city      String
+  state     String? // state/region
+  country   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  matches Match[]
+
+  @@map("stadiums")
+}
+
+model Match {
+  id           String      @id @default(cuid())
+  tournamentId String
+  homeTeamId   String
+  awayTeamId   String
+  stadiumId    String?
+  kickoffAt    DateTime
+  status       MatchStatus @default(SCHEDULED)
+  homeScore    Int? // nullable until a score exists
+  awayScore    Int?
+  phaseLabel   String? // free text: "Rodada 1", "Oitavas"...
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  tournament  Tournament   @relation(fields: [tournamentId], references: [id])
+  homeTeam    Team         @relation("HomeTeam", fields: [homeTeamId], references: [id])
+  awayTeam    Team         @relation("AwayTeam", fields: [awayTeamId], references: [id])
+  stadium     Stadium?     @relation(fields: [stadiumId], references: [id])
+  predictions Prediction[]
+
+  @@index([tournamentId])
+  @@index([status])
+  @@map("matches")
+}
+
+model Prediction {
+  id        String   @id @default(cuid())
+  userId    String
+  matchId   String
+  homeScore Int
+  awayScore Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  User  @relation(fields: [userId], references: [id])
+  match Match @relation(fields: [matchId], references: [id])
+
+  // Points are DERIVED by ScoringService — not stored as source of truth here.
+  @@unique([userId, matchId])
+  @@index([matchId])
+  @@map("predictions")
+}
+
+model AuditLog {
+  id          String         @id @default(cuid())
+  actorType   AuditActorType
+  actorUserId String?
+  action      String // e.g. GENERATE_PASSWORD, PROMOTE_ADMIN, DEACTIVATE_USER, UPDATE_MATCH_SCORE
+  entityType  String
+  entityId    String?
+  diff        Json? // { field: { before, after } }
+  createdAt   DateTime       @default(now()) // immutable: no update/delete
+
+  actor User? @relation("AuditActor", fields: [actorUserId], references: [id])
+
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
