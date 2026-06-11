@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { EventsService } from '../events/events.service';
 import { Paginated, paginated } from '../common/pagination';
 import { CreateMatchDto } from './dto/create-match.dto';
 import { QueryMatchesDto } from './dto/query-matches.dto';
@@ -24,6 +25,7 @@ export class MatchesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly events: EventsService,
   ) {}
 
   async findAll(query: QueryMatchesDto): Promise<Paginated<MatchWithRelations>> {
@@ -110,6 +112,7 @@ export class MatchesService {
         });
       }
     }
+    this.events.emit(`match:${updated.id}`, `tournament:${updated.tournamentId}`);
     return updated;
   }
 

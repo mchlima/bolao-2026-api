@@ -6,6 +6,7 @@ import {
 import { Match, Prediction, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ScoreResult, ScoringService } from '../scoring/scoring.service';
+import { EventsService } from '../events/events.service';
 import { UpsertPredictionDto } from './dto/upsert-prediction.dto';
 
 const PREDICTION_INCLUDE = {
@@ -32,6 +33,7 @@ export class PredictionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly scoring: ScoringService,
+    private readonly events: EventsService,
   ) {}
 
   async upsert(
@@ -60,6 +62,7 @@ export class PredictionsService {
       },
     });
 
+    this.events.emit(`match:${dto.matchId}`, `tournament:${match.tournamentId}`);
     return this.findOneForUser(userId, dto.matchId);
   }
 

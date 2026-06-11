@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { MatchStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EspnEvent, EspnService } from './espn.service';
+import { EventsService } from '../events/events.service';
 
 const STATE_TO_STATUS: Record<EspnEvent['state'], MatchStatus> = {
   pre: 'SCHEDULED',
@@ -29,6 +30,7 @@ export class LiveIngestService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly espn: EspnService,
+    private readonly events: EventsService,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -72,6 +74,7 @@ export class LiveIngestService {
       },
       select: {
         id: true,
+        tournamentId: true,
         status: true,
         homeScore: true,
         awayScore: true,
@@ -111,6 +114,7 @@ export class LiveIngestService {
 
       if (Object.keys(data).length > 0) {
         await this.prisma.match.update({ where: { id: m.id }, data });
+        this.events.emit(`match:${m.id}`, `tournament:${m.tournamentId}`);
         this.logger.log(
           `auto-update ${m.homeTeam!.shortName}x${m.awayTeam!.shortName}: ${JSON.stringify(data)}`,
         );
