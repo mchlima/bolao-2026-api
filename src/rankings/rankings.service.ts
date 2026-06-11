@@ -42,6 +42,9 @@ interface Acc {
   scored: number;
   prediction?: { home: number; away: number };
   tier?: ScoreTier;
+  // Tiebreaker: epoch ms of the relevant prediction (this match's, or the
+  // user's earliest in the tournament). Earlier predictions rank higher.
+  predictedAt?: number;
 }
 
 @Injectable()
@@ -89,6 +92,7 @@ export class RankingsService {
         matchId: true,
         homeScore: true,
         awayScore: true,
+        createdAt: true,
         user: { select: { id: true, name: true, isActive: true } },
       },
     });
@@ -101,6 +105,9 @@ export class RankingsService {
         a = { user: { id: p.user.id, name: p.user.name }, points: 0, exact: 0, scored: 0 };
         acc.set(p.userId, a);
       }
+      // Tiebreaker: the user's earliest prediction in the tournament.
+      const ts = p.createdAt.getTime();
+      if (a.predictedAt === undefined || ts < a.predictedAt) a.predictedAt = ts;
       const result = resultByMatch.get(p.matchId);
       if (result) {
         const s = this.scoring.score(
@@ -144,6 +151,7 @@ export class RankingsService {
         userId: true,
         homeScore: true,
         awayScore: true,
+        createdAt: true,
         user: { select: { id: true, name: true, isActive: true } },
       },
     });
@@ -157,6 +165,7 @@ export class RankingsService {
         exact: 0,
         scored: 0,
         prediction: { home: p.homeScore, away: p.awayScore },
+        predictedAt: p.createdAt.getTime(),
       };
       if (result) {
         const s = this.scoring.score(
@@ -219,6 +228,8 @@ export class RankingsService {
     accs.sort(
       (a, b) =>
         b.points - a.points ||
+        // Tiebreaker: earlier prediction wins (smaller epoch ms first).
+        (a.predictedAt ?? Infinity) - (b.predictedAt ?? Infinity) ||
         b.exact - a.exact ||
         a.user.name.localeCompare(b.user.name),
     );
@@ -226,9 +237,13 @@ export class RankingsService {
     const ranked: RankingEntry[] = [];
     for (let i = 0; i < accs.length; i++) {
       const a = accs[i];
-      // Ties (same points) share a rank.
+      // Truly tied (same points AND same prediction time) share a rank;
+      // otherwise the time tiebreaker gives distinct, sequential positions.
+      const prev = accs[i - 1];
       const rank =
-        i > 0 && accs[i - 1].points === a.points ? ranked[i - 1].rank : i + 1;
+        i > 0 && prev.points === a.points && prev.predictedAt === a.predictedAt
+          ? ranked[i - 1].rank
+          : i + 1;
       ranked.push({
         rank,
         user: a.user,
