@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { Request, Response } from 'express';
 
 /**
@@ -40,6 +41,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
         if (typeof body.code === 'string') code = body.code;
         if (Array.isArray(body.message)) details = body.message;
       }
+    } else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
+      ({ statusCode, code, message } = mapPrismaError(exception));
     } else {
       this.logger.error(exception);
     }
@@ -52,6 +55,39 @@ export class AllExceptionsFilter implements ExceptionFilter {
       timestamp: new Date().toISOString(),
       path: request.url,
     });
+  }
+}
+
+function mapPrismaError(e: Prisma.PrismaClientKnownRequestError): {
+  statusCode: number;
+  code: string;
+  message: string;
+} {
+  switch (e.code) {
+    case 'P2025': // record not found
+      return {
+        statusCode: HttpStatus.NOT_FOUND,
+        code: 'NOT_FOUND',
+        message: 'Registro não encontrado.',
+      };
+    case 'P2002': // unique constraint
+      return {
+        statusCode: HttpStatus.CONFLICT,
+        code: 'CONFLICT',
+        message: 'Registro já existe (violação de unicidade).',
+      };
+    case 'P2003': // foreign key constraint
+      return {
+        statusCode: HttpStatus.UNPROCESSABLE_ENTITY,
+        code: 'INVALID_REFERENCE',
+        message: 'Referência inválida (registro relacionado inexistente).',
+      };
+    default:
+      return {
+        statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+        code: 'INTERNAL_ERROR',
+        message: 'Erro interno do servidor.',
+      };
   }
 }
 

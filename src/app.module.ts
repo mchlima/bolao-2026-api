@@ -8,6 +8,8 @@ import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { TeamsModule } from './teams/teams.module';
 import { StadiumsModule } from './stadiums/stadiums.module';
+import { TournamentsModule } from './tournaments/tournaments.module';
+import { MatchesModule } from './matches/matches.module';
 
 @Module({
   imports: [
@@ -18,8 +20,10 @@ import { StadiumsModule } from './stadiums/stadiums.module';
     AuthModule,
     TeamsModule,
     StadiumsModule,
-    // Remaining feature modules added per build step (tournaments, matches,
-    // predictions, rankings, admin) — see docs §6.
+    TournamentsModule,
+    MatchesModule,
+    // Remaining feature modules added per build step (predictions, rankings,
+    // admin dashboard/live control) — see docs §6.
   ],
   controllers: [AppController],
   providers: [AppService],

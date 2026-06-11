@@ -117,23 +117,30 @@ model Stadium {
 model Match {
   id           String      @id @default(cuid())
   tournamentId String
-  homeTeamId   String
-  awayTeamId   String
+  // Teams are nullable: knockout slots are "to be determined" until the bracket resolves.
+  homeTeamId   String?
+  awayTeamId   String?
+  // Placeholder text when the team is TBD: e.g. "1º Grupo A", "Vencedor 73", "Melhor 3º".
+  homeSourceLabel String?
+  awaySourceLabel String?
   stadiumId    String?
   kickoffAt    DateTime
   status       MatchStatus @default(SCHEDULED)
   homeScore    Int? // nullable until a score exists
   awayScore    Int?
-  phaseLabel   String? // free text: "Rodada 1", "Oitavas"...
+  phaseLabel   String? // free text stage: "Fase de Grupos", "Oitavas de final"...
+  groupName    String? // "A".."L" for the group stage
+  matchNumber  Int? // official fixture number within the tournament (1..N)
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 
   tournament  Tournament   @relation(fields: [tournamentId], references: [id])
-  homeTeam    Team         @relation("HomeTeam", fields: [homeTeamId], references: [id])
-  awayTeam    Team         @relation("AwayTeam", fields: [awayTeamId], references: [id])
+  homeTeam    Team?        @relation("HomeTeam", fields: [homeTeamId], references: [id])
+  awayTeam    Team?        @relation("AwayTeam", fields: [awayTeamId], references: [id])
   stadium     Stadium?     @relation(fields: [stadiumId], references: [id])
   predictions Prediction[]
 
+  @@unique([tournamentId, matchNumber]) // idempotent fixture seeding
   @@index([tournamentId])
   @@index([status])
   @@map("matches")
