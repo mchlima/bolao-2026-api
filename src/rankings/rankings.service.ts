@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { ScoringService } from '../scoring/scoring.service';
+import { ScoreTier, ScoringService } from '../scoring/scoring.service';
 
 export interface RankingEntry {
   rank: number;
@@ -8,6 +8,9 @@ export interface RankingEntry {
   points: number;
   exactCount: number; // tiebreak / info
   scoredCount: number; // predictions that already counted (match had a result)
+  // Match ranking only: the participant's predicted scoreline and earned tier.
+  prediction?: { home: number; away: number };
+  tier?: ScoreTier;
 }
 
 export interface RankingResponse {
@@ -37,6 +40,8 @@ interface Acc {
   points: number;
   exact: number;
   scored: number;
+  prediction?: { home: number; away: number };
+  tier?: ScoreTier;
 }
 
 @Injectable()
@@ -153,6 +158,7 @@ export class RankingsService {
         points: 0,
         exact: 0,
         scored: 0,
+        prediction: { home: p.homeScore, away: p.awayScore },
       };
       if (result) {
         const s = this.scoring.score(
@@ -161,6 +167,7 @@ export class RankingsService {
         );
         a.points = s.points;
         a.scored = 1;
+        a.tier = s.tier;
         if (s.tier === 'EXACT') a.exact = 1;
       }
       entries.push(a);
@@ -230,6 +237,8 @@ export class RankingsService {
         points: a.points,
         exactCount: a.exact,
         scoredCount: a.scored,
+        ...(a.prediction ? { prediction: a.prediction } : {}),
+        ...(a.tier ? { tier: a.tier } : {}),
       });
     }
 
