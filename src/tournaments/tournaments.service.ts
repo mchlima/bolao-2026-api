@@ -10,7 +10,9 @@ import { UpdateTournamentDto } from './dto/update-tournament.dto';
 export class TournamentsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(query: QueryTournamentsDto): Promise<Paginated<Tournament>> {
+  async findAll(
+    query: QueryTournamentsDto,
+  ): Promise<Paginated<Tournament & { matchCount: number }>> {
     const { page, pageSize, search, status } = query;
     const where: Prisma.TournamentWhereInput = {
       ...(status && { status }),
@@ -23,11 +25,16 @@ export class TournamentsService {
         orderBy: { startDate: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
+        include: { _count: { select: { matches: true } } },
       }),
       this.prisma.tournament.count({ where }),
     ]);
 
-    return paginated(data, total, page, pageSize);
+    const shaped = data.map(({ _count, ...t }) => ({
+      ...t,
+      matchCount: _count.matches,
+    }));
+    return paginated(shaped, total, page, pageSize);
   }
 
   async findOne(id: string): Promise<Tournament> {
