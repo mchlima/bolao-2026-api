@@ -10,11 +10,14 @@ import { TeamsModule } from './teams/teams.module';
 import { StadiumsModule } from './stadiums/stadiums.module';
 import { TournamentsModule } from './tournaments/tournaments.module';
 import { MatchesModule } from './matches/matches.module';
+import { ScoringModule } from './scoring/scoring.module';
+import { PredictionsModule } from './predictions/predictions.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
+    ScoringModule,
     HealthModule,
     UsersModule,
     AuthModule,
@@ -22,7 +25,8 @@ import { MatchesModule } from './matches/matches.module';
     StadiumsModule,
     TournamentsModule,
     MatchesModule,
-    // Remaining feature modules added per build step (predictions, rankings,
+    PredictionsModule,
+    // Remaining feature modules added per build step (rankings + engagement,
     // admin dashboard/live control) — see docs §6.
   ],
   controllers: [AppController],
