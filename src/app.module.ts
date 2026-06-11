@@ -15,6 +15,7 @@ import { PredictionsModule } from './predictions/predictions.module';
 import { RankingsModule } from './rankings/rankings.module';
 import { AuditModule } from './audit/audit.module';
 import { AdminModule } from './admin/admin.module';
+import { StorageModule } from './storage/storage.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { AdminModule } from './admin/admin.module';
     PrismaModule,
     ScoringModule,
     AuditModule,
+    StorageModule,
     HealthModule,
     UsersModule,
     AuthModule,
