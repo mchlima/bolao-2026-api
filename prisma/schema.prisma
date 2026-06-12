@@ -94,6 +94,11 @@ model Team {
   // CLUB:
   country String?
   logoUrl String?
+  logoDarkUrl String? // dark-theme crest variant (ESPN serves a -dark logo)
+  // ESPN-sourced club metadata (idempotent seeding + robot match-by-id; UI theming):
+  espnId   String? @unique // ESPN team id — stable external key (club siglas collide across leagues)
+  color    String? // primary brand color (hex, no #)
+  colorAlt String? // secondary/alternate brand color (hex, no #)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
