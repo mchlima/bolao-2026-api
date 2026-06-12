@@ -44,4 +44,19 @@ export class UpdateTeamDto {
   @IsString()
   @MaxLength(500)
   logoUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  logoDarkUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(12)
+  color?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(12)
+  colorAlt?: string;
 }

@@ -13,6 +13,12 @@ export class TeamsController {
     return this.teams.findAll(query);
   }
 
+  /** Distinct countries/continents/types with counts — powers the admin filters. */
+  @Get('facets')
+  facets(): ReturnType<TeamsService['facets']> {
+    return this.teams.facets();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string): Promise<Team> {
     return this.teams.findOne(id);

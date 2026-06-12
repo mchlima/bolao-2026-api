@@ -42,4 +42,20 @@ export class CreateTeamDto {
   @IsString()
   @MaxLength(500)
   logoUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  logoDarkUrl?: string;
+
+  // Brand colors (hex without #), e.g. "D80518".
+  @IsOptional()
+  @IsString()
+  @MaxLength(12)
+  color?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(12)
+  colorAlt?: string;
 }
