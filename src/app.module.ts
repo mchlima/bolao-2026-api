@@ -18,6 +18,7 @@ import { AdminModule } from './admin/admin.module';
 import { StorageModule } from './storage/storage.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { LiveIngestModule } from './live-ingest/live-ingest.module';
+import { MatchWindowModule } from './match-window/match-window.module';
 import { EventsModule } from './events/events.module';
 
 @Module({
@@ -40,6 +41,7 @@ import { EventsModule } from './events/events.module';
     RankingsModule,
     AdminModule,
     LiveIngestModule,
+    MatchWindowModule,
   ],
   controllers: [AppController],
   providers: [AppService],
