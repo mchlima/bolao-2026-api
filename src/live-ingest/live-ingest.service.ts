@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { Cron } from '@nestjs/schedule';
 import { MatchStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EspnEvent, EspnService } from './espn.service';
@@ -15,12 +15,19 @@ const RANK: Record<string, number> = { SCHEDULED: 0, LIVE: 1, FINISHED: 2 };
 const START_WINDOW_MIN = 15; // start polling this many minutes before kickoff
 const END_WINDOW_HOURS = 3; // ...until this long after kickoff
 
+// Tick cadence (6-field cron, with seconds). 15s gives ~15s worst-case
+// detection of a kickoff or goal while staying gentle on ESPN's unofficial
+// endpoint. A tick with no match in window costs just one indexed query.
+const TICK_CRON = '*/15 * * * * *';
+
 /**
- * ESPN robot: every 30s it auto-advances match status (SCHEDULED → LIVE →
- * FINISHED) and live score from the ESPN scoreboard. Polls only inside a match
- * window; runs every 30s while a match is LIVE, else scans every 5 minutes.
- * Skips matches an admin took over (autoManaged=false), cancelled ones, and
- * knockout slots without both teams. ESPN status is the source of truth.
+ * ESPN robot: every 15s it reconciles any match inside its window (15 min before
+ * kickoff until 3h after) against the ESPN scoreboard — auto-advancing status
+ * (SCHEDULED → LIVE → FINISHED) and live score. Because it polls through the
+ * whole window (not only once a match is already LIVE), a kickoff or goal is
+ * reflected within ~15s. When no match is near, a tick is a single indexed query
+ * and makes no ESPN call. Skips matches an admin took over (autoManaged=false),
+ * cancelled ones, and knockout slots without both teams. ESPN is the truth.
  */
 @Injectable()
 export class LiveIngestService {
@@ -33,7 +40,7 @@ export class LiveIngestService {
     private readonly events: EventsService,
   ) {}
 
-  @Cron(CronExpression.EVERY_30_SECONDS)
+  @Cron(TICK_CRON)
   async tick(): Promise<void> {
     // Only the production instance drives the robot (dev shares the same DB).
     if (process.env.NODE_ENV !== 'production') return;
@@ -50,12 +57,9 @@ export class LiveIngestService {
 
   private async run(): Promise<void> {
     const now = new Date();
-    const liveCount = await this.prisma.match.count({
-      where: { status: 'LIVE', autoManaged: true },
-    });
-    // Every 30s while something is live; otherwise only scan on the 5-min mark.
-    if (liveCount === 0 && now.getMinutes() % 5 !== 0) return;
-
+    // One indexed query every tick: the matches in their window (LIVE, or
+    // SCHEDULED and near kickoff). Empty in-window set ⇒ return before any ESPN
+    // call, so an idle tick is cheap and a kickoff is still caught within ~15s.
     const candidates = await this.prisma.match.findMany({
       where: {
         autoManaged: true,
