@@ -7,6 +7,11 @@ export class CreatePoolDto {
   @MaxLength(60)
   name!: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  description?: string;
+
   @IsString()
   tournamentId!: string;
 

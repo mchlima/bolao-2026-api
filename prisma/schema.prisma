@@ -221,6 +221,7 @@ model AuditLog {
 model Pool {
   id           String         @id @default(cuid())
   name         String
+  description  String? // shown to members and on the invite-accept page
   tournamentId String
   ownerId      String
   visibility   PoolVisibility @default(PRIVATE)

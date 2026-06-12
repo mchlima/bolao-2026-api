@@ -9,6 +9,11 @@ export class UpdatePoolDto {
   name?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  description?: string;
+
+  @IsOptional()
   @IsEnum(PoolVisibility)
   visibility?: PoolVisibility;
 }

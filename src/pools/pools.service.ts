@@ -56,6 +56,7 @@ export class PoolsService {
     const pool = await this.prisma.pool.create({
       data: {
         name: dto.name,
+        description: dto.description ?? null,
         tournamentId: dto.tournamentId,
         ownerId: userId,
         visibility: dto.visibility ?? 'PRIVATE',
@@ -84,6 +85,7 @@ export class PoolsService {
     return memberships.map((m) => ({
       id: m.pool.id,
       name: m.pool.name,
+      description: m.pool.description,
       visibility: m.pool.visibility,
       tournament: m.pool.tournament,
       myRole: m.role,
@@ -124,6 +126,7 @@ export class PoolsService {
     return {
       id: pool.id,
       name: pool.name,
+      description: pool.description,
       visibility: pool.visibility,
       tournament: pool.tournament,
       myRole: membership.role,
@@ -148,6 +151,7 @@ export class PoolsService {
       where: { id: poolId },
       data: {
         ...(dto.name !== undefined && { name: dto.name }),
+        ...(dto.description !== undefined && { description: dto.description }),
         ...(dto.visibility !== undefined && { visibility: dto.visibility }),
       },
     });
@@ -309,6 +313,7 @@ export class PoolsService {
     return {
       id: invite.pool.id,
       name: invite.pool.name,
+      description: invite.pool.description,
       visibility: invite.pool.visibility,
       tournament: invite.pool.tournament,
       memberCount: invite.pool._count.members,
