@@ -261,6 +261,25 @@ export class PoolsService {
     return this.toInviteView(updated);
   }
 
+  async deleteInvite(
+    poolId: string,
+    userId: string,
+    inviteId: string,
+  ): Promise<void> {
+    await this.requireManage(poolId, userId);
+    const invite = await this.prisma.poolInvite.findUnique({
+      where: { id: inviteId },
+      select: { id: true, poolId: true },
+    });
+    if (!invite || invite.poolId !== poolId) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Link de convite não encontrado.',
+      });
+    }
+    await this.prisma.poolInvite.delete({ where: { id: inviteId } });
+  }
+
   // ─────────────────────────────────────────────── Joining
 
   /** What an invite code points to — for a confirm screen before joining. */

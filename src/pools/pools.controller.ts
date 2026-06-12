@@ -144,6 +144,15 @@ export class PoolsController {
     return this.pools.updateInvite(id, user.id, inviteId, dto);
   }
 
+  @Delete(':id/invites/:inviteId')
+  deleteInvite(
+    @CurrentUser() user: SafeUser,
+    @Param('id') id: string,
+    @Param('inviteId') inviteId: string,
+  ): Promise<void> {
+    return this.pools.deleteInvite(id, user.id, inviteId);
+  }
+
   // ── Members ──
 
   @Patch(':id/members/:userId')
