@@ -1,6 +1,5 @@
-import { PrismaClient, TeamType } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { hash } from 'bcryptjs';
-import { NATIONAL_TEAMS } from './data/national-teams';
 import { WC2026_STADIUMS } from './data/wc2026-stadiums';
 import {
   VENUE_UTC_OFFSET,
@@ -36,27 +35,10 @@ async function seedAdmin(): Promise<void> {
   console.log(`✓ admin: ${email}`);
 }
 
-async function seedTeams(): Promise<void> {
-  for (const t of NATIONAL_TEAMS) {
-    await prisma.team.upsert({
-      where: { countryCode: t.countryCode },
-      update: {
-        name: t.name,
-        shortName: t.shortName,
-        continent: t.continent,
-        type: TeamType.NATIONAL_TEAM,
-      },
-      create: {
-        name: t.name,
-        shortName: t.shortName,
-        countryCode: t.countryCode,
-        continent: t.continent,
-        type: TeamType.NATIONAL_TEAM,
-      },
-    });
-  }
-  console.log(`✓ national teams: ${NATIONAL_TEAMS.length}`);
-}
+// National teams are no longer seeded here — they are sourced and kept current
+// from ESPN by prisma/seed-national-teams.ts (espnId, colors, English names,
+// crests). The World Cup match seeding below links teams by countryCode, which
+// that enrichment preserves.
 
 async function seedStadiums(): Promise<void> {
   for (const s of WC2026_STADIUMS) {
@@ -101,7 +83,11 @@ async function seedWorldCup(): Promise<void> {
   const resolveTeam = (code: string | null): string | null => {
     if (!code) return null;
     const id = teamByCode.get(code);
-    if (!id) throw new Error(`Seed: team not found for countryCode "${code}"`);
+    if (!id) {
+      // National teams come from seed-national-teams.ts; if absent, leave TBD.
+      console.warn(`Seed: team not found for countryCode "${code}" — left TBD`);
+      return null;
+    }
     return id;
   };
 
@@ -147,7 +133,6 @@ async function seedWorldCup(): Promise<void> {
 async function main(): Promise<void> {
   console.log('Seeding…');
   await seedAdmin();
-  await seedTeams();
   await seedStadiums();
   await seedWorldCup();
   console.log('Seed complete.');
