@@ -15,7 +15,9 @@ export class StorageService {
     const accessKeyId = config.get<string>('STORAGE_ACCESS_KEY_ID');
     const secretAccessKey = config.get<string>('STORAGE_SECRET_ACCESS_KEY');
     this.bucket = config.get<string>('STORAGE_BUCKET') ?? '';
-    this.publicBaseUrl = (config.get<string>('STORAGE_PUBLIC_BASE_URL') ?? '').replace(/\/$/, '');
+    this.publicBaseUrl = (
+      config.get<string>('STORAGE_PUBLIC_BASE_URL') ?? ''
+    ).replace(/\/$/, '');
 
     this.client =
       endpoint && accessKeyId && secretAccessKey && this.bucket
@@ -37,7 +39,8 @@ export class StorageService {
     if (!this.client) {
       throw new ServiceUnavailableException({
         code: 'STORAGE_NOT_CONFIGURED',
-        message: 'Storage de imagens não configurado (defina STORAGE_* no .env).',
+        message:
+          'Storage de imagens não configurado (defina STORAGE_* no .env).',
       });
     }
 

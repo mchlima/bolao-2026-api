@@ -15,17 +15,25 @@ export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
   async overview(): Promise<DashboardOverview> {
-    const [users, active, admins, tournaments, teams, stadiums, matches, predictions] =
-      await this.prisma.$transaction([
-        this.prisma.user.count(),
-        this.prisma.user.count({ where: { isActive: true } }),
-        this.prisma.user.count({ where: { role: 'ADMIN' } }),
-        this.prisma.tournament.count(),
-        this.prisma.team.count(),
-        this.prisma.stadium.count(),
-        this.prisma.match.count(),
-        this.prisma.prediction.count(),
-      ]);
+    const [
+      users,
+      active,
+      admins,
+      tournaments,
+      teams,
+      stadiums,
+      matches,
+      predictions,
+    ] = await this.prisma.$transaction([
+      this.prisma.user.count(),
+      this.prisma.user.count({ where: { isActive: true } }),
+      this.prisma.user.count({ where: { role: 'ADMIN' } }),
+      this.prisma.tournament.count(),
+      this.prisma.team.count(),
+      this.prisma.stadium.count(),
+      this.prisma.match.count(),
+      this.prisma.prediction.count(),
+    ]);
 
     const byStatusRows = await this.prisma.match.groupBy({
       by: ['status'],

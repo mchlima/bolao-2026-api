@@ -56,7 +56,9 @@ export class UsersService {
 
   // ─────────────── Admin ───────────────
 
-  async findAllPaginated(query: QueryUsersParams): Promise<Paginated<SafeUser>> {
+  async findAllPaginated(
+    query: QueryUsersParams,
+  ): Promise<Paginated<SafeUser>> {
     const { page, pageSize, search, role, isActive } = query;
     const where: Prisma.UserWhereInput = {
       ...(role && { role }),
@@ -164,11 +166,12 @@ export class UsersService {
     return { user: strip(user), temporaryPassword };
   }
 
-  updateProfile(
-    id: string,
-    data: { timezone?: string },
-  ): Promise<SafeUser> {
-    return this.prisma.user.update({ where: { id }, data, select: SAFE_SELECT });
+  updateProfile(id: string, data: { timezone?: string }): Promise<SafeUser> {
+    return this.prisma.user.update({
+      where: { id },
+      data,
+      select: SAFE_SELECT,
+    });
   }
 
   private async getOrThrow(id: string): Promise<User> {

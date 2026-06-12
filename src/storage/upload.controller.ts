@@ -21,16 +21,24 @@ export class UploadController {
   constructor(private readonly storage: StorageService) {}
 
   @Post('image')
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }),
+  )
   async image(
     @UploadedFile() file: Express.Multer.File | undefined,
     @Query('prefix') prefix?: string,
   ): Promise<{ url: string }> {
     if (!file) {
-      throw new BadRequestException({ code: 'NO_FILE', message: 'Nenhum arquivo enviado.' });
+      throw new BadRequestException({
+        code: 'NO_FILE',
+        message: 'Nenhum arquivo enviado.',
+      });
     }
     if (!file.mimetype.startsWith('image/')) {
-      throw new BadRequestException({ code: 'INVALID_FILE', message: 'Envie uma imagem.' });
+      throw new BadRequestException({
+        code: 'INVALID_FILE',
+        message: 'Envie uma imagem.',
+      });
     }
     const safePrefix = (prefix || 'misc').replace(/[^a-z0-9-]/gi, '') || 'misc';
     const url = await this.storage.uploadImage(file.buffer, safePrefix);

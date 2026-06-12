@@ -28,7 +28,9 @@ export class MatchesService {
     private readonly events: EventsService,
   ) {}
 
-  async findAll(query: QueryMatchesDto): Promise<Paginated<MatchWithRelations>> {
+  async findAll(
+    query: QueryMatchesDto,
+  ): Promise<Paginated<MatchWithRelations>> {
     const { page, pageSize, tournamentId, status, groupName } = query;
     const where: Prisma.MatchWhereInput = {
       ...(tournamentId && { tournamentId }),
@@ -112,7 +114,10 @@ export class MatchesService {
         });
       }
     }
-    this.events.emit(`match:${updated.id}`, `tournament:${updated.tournamentId}`);
+    this.events.emit(
+      `match:${updated.id}`,
+      `tournament:${updated.tournamentId}`,
+    );
     return updated;
   }
 

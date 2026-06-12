@@ -9,9 +9,7 @@ export class TournamentsController {
   constructor(private readonly tournaments: TournamentsService) {}
 
   @Get()
-  findAll(
-    @Query() query: QueryTournamentsDto,
-  ): Promise<Paginated<Tournament>> {
+  findAll(@Query() query: QueryTournamentsDto): Promise<Paginated<Tournament>> {
     return this.tournaments.findAll(query);
   }
 
