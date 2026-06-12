@@ -57,6 +57,9 @@ export class RankingsService {
   async tournamentRanking(
     tournamentId: string,
     currentUserId?: string,
+    // When given, the ranking is scoped to these members (a pool/"bolão");
+    // omit for the global ranking on the tournament page.
+    memberUserIds?: string[],
   ): Promise<RankingResponse> {
     const tournament = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
@@ -86,7 +89,10 @@ export class RankingsService {
     );
 
     const predictions = await this.prisma.prediction.findMany({
-      where: { match: { tournamentId } },
+      where: {
+        match: { tournamentId },
+        ...(memberUserIds && { userId: { in: memberUserIds } }),
+      },
       select: {
         userId: true,
         matchId: true,
@@ -102,7 +108,12 @@ export class RankingsService {
       if (!p.user.isActive) continue;
       let a = acc.get(p.userId);
       if (!a) {
-        a = { user: { id: p.user.id, name: p.user.name }, points: 0, exact: 0, scored: 0 };
+        a = {
+          user: { id: p.user.id, name: p.user.name },
+          points: 0,
+          exact: 0,
+          scored: 0,
+        };
         acc.set(p.userId, a);
       }
       // Tiebreaker: the user's earliest prediction in the tournament.
@@ -126,6 +137,8 @@ export class RankingsService {
   async matchRanking(
     matchId: string,
     currentUserId?: string,
+    // When given, the ranking is scoped to these members (a pool/"bolão").
+    memberUserIds?: string[],
   ): Promise<MatchRankingResponse> {
     const match = await this.prisma.match.findUnique({
       where: { id: matchId },
@@ -146,7 +159,10 @@ export class RankingsService {
       : null;
 
     const predictions = await this.prisma.prediction.findMany({
-      where: { matchId },
+      where: {
+        matchId,
+        ...(memberUserIds && { userId: { in: memberUserIds } }),
+      },
       select: {
         userId: true,
         homeScore: true,
@@ -211,9 +227,7 @@ export class RankingsService {
         homeScore: g.homeScore,
         awayScore: g.awayScore,
         count: g._count._all,
-        percentage: total
-          ? Math.round((g._count._all / total) * 1000) / 10
-          : 0,
+        percentage: total ? Math.round((g._count._all / total) * 1000) / 10 : 0,
       }))
       .sort((a, b) => b.count - a.count);
 
@@ -221,10 +235,7 @@ export class RankingsService {
   }
 
   /** Sort, assign tie-aware ranks, take top 100, and locate the current user. */
-  private buildResponse(
-    accs: Acc[],
-    currentUserId?: string,
-  ): RankingResponse {
+  private buildResponse(accs: Acc[], currentUserId?: string): RankingResponse {
     accs.sort(
       (a, b) =>
         b.points - a.points ||
@@ -258,8 +269,7 @@ export class RankingsService {
     return {
       entries: ranked.slice(0, 100),
       currentUser:
-        (currentUserId &&
-          ranked.find((e) => e.user.id === currentUserId)) ||
+        (currentUserId && ranked.find((e) => e.user.id === currentUserId)) ||
         null,
       totalParticipants: ranked.length,
     };
