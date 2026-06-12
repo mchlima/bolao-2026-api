@@ -13,6 +13,7 @@ import { MatchesModule } from './matches/matches.module';
 import { ScoringModule } from './scoring/scoring.module';
 import { PredictionsModule } from './predictions/predictions.module';
 import { RankingsModule } from './rankings/rankings.module';
+import { PoolsModule } from './pools/pools.module';
 import { AuditModule } from './audit/audit.module';
 import { AdminModule } from './admin/admin.module';
 import { StorageModule } from './storage/storage.module';
@@ -39,6 +40,7 @@ import { EventsModule } from './events/events.module';
     MatchesModule,
     PredictionsModule,
     RankingsModule,
+    PoolsModule,
     AdminModule,
     LiveIngestModule,
     MatchWindowModule,

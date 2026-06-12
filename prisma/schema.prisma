@@ -47,6 +47,20 @@ enum AuditActorType {
   SYSTEM
 }
 
+// "Bolão" (pt-BR UI) = Pool (code/data). A Pool is a private group competing on
+// one tournament's predictions; it never holds predictions of its own (those are
+// global per user) — it only scopes which members enter the rankings.
+enum PoolVisibility {
+  PRIVATE // joinable only via an invite link (MVP default)
+  PUBLIC // reserved for a future discoverable showcase
+}
+
+enum PoolMemberRole {
+  OWNER // creator; exclusive: delete pool, transfer ownership, promote/demote admins
+  ADMIN // manages members, invite links and pool metadata
+  MEMBER // participates (global prediction shows up in this pool's ranking)
+}
+
 // ─────────────────────────────────────────────────────────── Models
 
 model User {
@@ -63,6 +77,10 @@ model User {
   predictions Prediction[]
   auditLogs   AuditLog[]   @relation("AuditActor")
 
+  ownedPools         Pool[]       @relation("PoolOwner")
+  poolMemberships    PoolMember[]
+  createdPoolInvites PoolInvite[]
+
   @@map("users")
 }
 
@@ -77,30 +95,31 @@ model Tournament {
   updatedAt DateTime         @updatedAt
 
   matches Match[]
+  pools   Pool[]
 
   @@map("tournaments")
 }
 
 model Team {
-  id        String   @id @default(cuid())
-  name      String
-  shortName String // sigla
-  type      TeamType
+  id          String   @id @default(cuid())
+  name        String
+  shortName   String // sigla
+  type        TeamType
   // NATIONAL_TEAM:
   // ISO 3166-1 alpha-2 (drives country-flag-icons); GB-ENG/GB-SCT/GB-WLS/GB-NIR for UK nations.
   // @unique is sparse (NULL allowed for many CLUB rows) — enables idempotent national-team seeding.
-  countryCode String? @unique
+  countryCode String?  @unique
   continent   String?
   // CLUB:
-  country String?
-  logoUrl String?
+  country     String?
+  logoUrl     String?
   logoDarkUrl String? // dark-theme crest variant (ESPN serves a -dark logo)
   // ESPN-sourced club metadata (idempotent seeding + robot match-by-id; UI theming):
-  espnId   String? @unique // ESPN team id — stable external key (club siglas collide across leagues)
-  color    String? // primary brand color (hex, no #)
-  colorAlt String? // secondary/alternate brand color (hex, no #)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  espnId      String?  @unique // ESPN team id — stable external key (club siglas collide across leagues)
+  color       String? // primary brand color (hex, no #)
+  colorAlt    String? // secondary/alternate brand color (hex, no #)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   homeMatches Match[] @relation("HomeTeam")
   awayMatches Match[] @relation("AwayTeam")
@@ -124,31 +143,31 @@ model Stadium {
 }
 
 model Match {
-  id           String      @id @default(cuid())
-  tournamentId String
+  id              String      @id @default(cuid())
+  tournamentId    String
   // Teams are nullable: knockout slots are "to be determined" until the bracket resolves.
-  homeTeamId   String?
-  awayTeamId   String?
+  homeTeamId      String?
+  awayTeamId      String?
   // Placeholder text when the team is TBD: e.g. "1º Grupo A", "Vencedor 73", "Melhor 3º".
   homeSourceLabel String?
   awaySourceLabel String?
-  stadiumId    String?
-  kickoffAt    DateTime
-  status       MatchStatus @default(SCHEDULED)
-  homeScore    Int @default(0) // matches default to 0x0; never null
-  awayScore    Int @default(0)
-  phaseLabel   String? // free text stage: "Fase de Grupos", "Oitavas de final"...
-  groupName    String? // "A".."L" for the group stage
-  matchNumber  Int? // official fixture number within the tournament (1..N)
+  stadiumId       String?
+  kickoffAt       DateTime
+  status          MatchStatus @default(SCHEDULED)
+  homeScore       Int         @default(0) // matches default to 0x0; never null
+  awayScore       Int         @default(0)
+  phaseLabel      String? // free text stage: "Fase de Grupos", "Oitavas de final"...
+  groupName       String? // "A".."L" for the group stage
+  matchNumber     Int? // official fixture number within the tournament (1..N)
   // Manual override for the prediction window. NULL = follow the automatic rule
   // (open while SCHEDULED and before kickoff); true/false force open/closed.
   predictionsOpen Boolean?
   // Auto score/lifecycle (ESPN robot). externalId links to the provider fixture;
   // autoManaged false means the admin took over and the robot must skip it.
-  externalId  String?
-  autoManaged Boolean @default(true)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  externalId      String?
+  autoManaged     Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
 
   tournament  Tournament   @relation(fields: [tournamentId], references: [id])
   homeTeam    Team?        @relation("HomeTeam", fields: [homeTeamId], references: [id])
@@ -194,4 +213,62 @@ model AuditLog {
 
   @@index([entityType, entityId])
   @@map("audit_logs")
+}
+
+// A pool ("bolão") = one tournament from the global catalog + a group of members.
+// Predictions stay global (Prediction is unchanged); the pool only scopes rankings
+// to its members. Created over an existing tournament — users never create tournaments.
+model Pool {
+  id                String         @id @default(cuid())
+  name              String
+  description       String? // internal — shown to members inside the pool
+  inviteDescription String? // shown on the invite-accept page (public via link)
+  tournamentId      String
+  ownerId           String
+  visibility        PoolVisibility @default(PRIVATE)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  tournament Tournament   @relation(fields: [tournamentId], references: [id])
+  owner      User         @relation("PoolOwner", fields: [ownerId], references: [id])
+  members    PoolMember[]
+  invites    PoolInvite[]
+
+  @@index([tournamentId])
+  @@index([ownerId])
+  @@map("pools")
+}
+
+model PoolMember {
+  id       String         @id @default(cuid())
+  poolId   String
+  userId   String
+  role     PoolMemberRole @default(MEMBER)
+  joinedAt DateTime       @default(now())
+
+  pool Pool @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([poolId, userId]) // a user joins a pool once
+  @@index([userId])
+  @@map("pool_members")
+}
+
+// Named, revocable invite link (WhatsApp-style). N per pool. Joining resolves an
+// active code to its pool. Future: expiresAt / maxUses / QR code / email delivery.
+model PoolInvite {
+  id          String   @id @default(cuid())
+  poolId      String
+  name        String // label of the link, e.g. "Turma do trabalho", "WhatsApp"
+  code        String   @unique // token used in the join URL (/b/join/<code>)
+  createdById String // pool owner/admin who created it
+  isActive    Boolean  @default(true) // revoke without deleting history
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  pool      Pool @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  createdBy User @relation(fields: [createdById], references: [id])
+
+  @@index([poolId])
+  @@map("pool_invites")
 }

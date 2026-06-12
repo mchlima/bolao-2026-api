@@ -22,6 +22,9 @@ export interface RankingResponse {
 export interface MatchRankingResponse extends RankingResponse {
   provisional: boolean; // true while the match is LIVE
   result: { home: number; away: number } | null;
+  // False until kickoff: others' predictions are hidden (only the caller sees
+  // their own), so nobody peeks at guesses before betting. entries is empty.
+  revealed: boolean;
 }
 
 export interface EngagementResponse {
@@ -57,6 +60,9 @@ export class RankingsService {
   async tournamentRanking(
     tournamentId: string,
     currentUserId?: string,
+    // When given, the ranking is scoped to these members (a pool/"bolão");
+    // omit for the global ranking on the tournament page.
+    memberUserIds?: string[],
   ): Promise<RankingResponse> {
     const tournament = await this.prisma.tournament.findUnique({
       where: { id: tournamentId },
@@ -86,7 +92,10 @@ export class RankingsService {
     );
 
     const predictions = await this.prisma.prediction.findMany({
-      where: { match: { tournamentId } },
+      where: {
+        match: { tournamentId },
+        ...(memberUserIds && { userId: { in: memberUserIds } }),
+      },
       select: {
         userId: true,
         matchId: true,
@@ -102,7 +111,12 @@ export class RankingsService {
       if (!p.user.isActive) continue;
       let a = acc.get(p.userId);
       if (!a) {
-        a = { user: { id: p.user.id, name: p.user.name }, points: 0, exact: 0, scored: 0 };
+        a = {
+          user: { id: p.user.id, name: p.user.name },
+          points: 0,
+          exact: 0,
+          scored: 0,
+        };
         acc.set(p.userId, a);
       }
       // Tiebreaker: the user's earliest prediction in the tournament.
@@ -126,10 +140,18 @@ export class RankingsService {
   async matchRanking(
     matchId: string,
     currentUserId?: string,
+    // When given, the ranking is scoped to these members (a pool/"bolão").
+    memberUserIds?: string[],
   ): Promise<MatchRankingResponse> {
     const match = await this.prisma.match.findUnique({
       where: { id: matchId },
-      select: { id: true, status: true, homeScore: true, awayScore: true },
+      select: {
+        id: true,
+        status: true,
+        homeScore: true,
+        awayScore: true,
+        kickoffAt: true,
+      },
     });
     if (!match) {
       throw new NotFoundException({
@@ -146,7 +168,10 @@ export class RankingsService {
       : null;
 
     const predictions = await this.prisma.prediction.findMany({
-      where: { matchId },
+      where: {
+        matchId,
+        ...(memberUserIds && { userId: { in: memberUserIds } }),
+      },
       select: {
         userId: true,
         homeScore: true,
@@ -155,6 +180,35 @@ export class RankingsService {
         user: { select: { id: true, name: true, isActive: true } },
       },
     });
+    const active = predictions.filter((p) => p.user.isActive);
+
+    // Predictions are secret until kickoff (same fairness rule as the lock).
+    // Before that, return the count but hide everyone's guesses — the caller
+    // still gets their own (for the "your prediction" UI).
+    const revealed = playing || new Date() >= match.kickoffAt;
+    if (!revealed) {
+      const own = active.find((p) => p.userId === currentUserId);
+      const ownEntry: Acc[] = own
+        ? [
+            {
+              user: { id: own.user.id, name: own.user.name },
+              points: 0,
+              exact: 0,
+              scored: 0,
+              prediction: { home: own.homeScore, away: own.awayScore },
+              predictedAt: own.createdAt.getTime(),
+            },
+          ]
+        : [];
+      return {
+        entries: [],
+        currentUser: this.buildResponse(ownEntry, currentUserId).currentUser,
+        totalParticipants: active.length,
+        provisional: false,
+        result: null,
+        revealed: false,
+      };
+    }
 
     const entries: Acc[] = [];
     for (const p of predictions) {
@@ -184,6 +238,7 @@ export class RankingsService {
       ...this.buildResponse(entries, currentUserId),
       provisional: match.status === 'LIVE',
       result,
+      revealed: true,
     };
   }
 
@@ -211,9 +266,7 @@ export class RankingsService {
         homeScore: g.homeScore,
         awayScore: g.awayScore,
         count: g._count._all,
-        percentage: total
-          ? Math.round((g._count._all / total) * 1000) / 10
-          : 0,
+        percentage: total ? Math.round((g._count._all / total) * 1000) / 10 : 0,
       }))
       .sort((a, b) => b.count - a.count);
 
@@ -221,10 +274,7 @@ export class RankingsService {
   }
 
   /** Sort, assign tie-aware ranks, take top 100, and locate the current user. */
-  private buildResponse(
-    accs: Acc[],
-    currentUserId?: string,
-  ): RankingResponse {
+  private buildResponse(accs: Acc[], currentUserId?: string): RankingResponse {
     accs.sort(
       (a, b) =>
         b.points - a.points ||
@@ -258,8 +308,7 @@ export class RankingsService {
     return {
       entries: ranked.slice(0, 100),
       currentUser:
-        (currentUserId &&
-          ranked.find((e) => e.user.id === currentUserId)) ||
+        (currentUserId && ranked.find((e) => e.user.id === currentUserId)) ||
         null,
       totalParticipants: ranked.length,
     };
