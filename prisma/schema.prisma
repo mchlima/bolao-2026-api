@@ -219,14 +219,15 @@ model AuditLog {
 // Predictions stay global (Prediction is unchanged); the pool only scopes rankings
 // to its members. Created over an existing tournament — users never create tournaments.
 model Pool {
-  id           String         @id @default(cuid())
-  name         String
-  description  String? // shown to members and on the invite-accept page
-  tournamentId String
-  ownerId      String
-  visibility   PoolVisibility @default(PRIVATE)
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  id                String         @id @default(cuid())
+  name              String
+  description       String? // internal — shown to members inside the pool
+  inviteDescription String? // shown on the invite-accept page (public via link)
+  tournamentId      String
+  ownerId           String
+  visibility        PoolVisibility @default(PRIVATE)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 
   tournament Tournament   @relation(fields: [tournamentId], references: [id])
   owner      User         @relation("PoolOwner", fields: [ownerId], references: [id])

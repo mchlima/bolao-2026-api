@@ -57,6 +57,7 @@ export class PoolsService {
       data: {
         name: dto.name,
         description: dto.description ?? null,
+        inviteDescription: dto.inviteDescription ?? null,
         tournamentId: dto.tournamentId,
         ownerId: userId,
         visibility: dto.visibility ?? 'PRIVATE',
@@ -86,6 +87,7 @@ export class PoolsService {
       id: m.pool.id,
       name: m.pool.name,
       description: m.pool.description,
+      inviteDescription: m.pool.inviteDescription,
       visibility: m.pool.visibility,
       tournament: m.pool.tournament,
       myRole: m.role,
@@ -127,6 +129,7 @@ export class PoolsService {
       id: pool.id,
       name: pool.name,
       description: pool.description,
+      inviteDescription: pool.inviteDescription,
       visibility: pool.visibility,
       tournament: pool.tournament,
       myRole: membership.role,
@@ -152,6 +155,9 @@ export class PoolsService {
       data: {
         ...(dto.name !== undefined && { name: dto.name }),
         ...(dto.description !== undefined && { description: dto.description }),
+        ...(dto.inviteDescription !== undefined && {
+          inviteDescription: dto.inviteDescription,
+        }),
         ...(dto.visibility !== undefined && { visibility: dto.visibility }),
       },
     });
@@ -313,7 +319,8 @@ export class PoolsService {
     return {
       id: invite.pool.id,
       name: invite.pool.name,
-      description: invite.pool.description,
+      // The invite page shows the invite-facing text, not the internal one.
+      description: invite.pool.inviteDescription,
       visibility: invite.pool.visibility,
       tournament: invite.pool.tournament,
       memberCount: invite.pool._count.members,

@@ -26,7 +26,8 @@ export interface PoolInviteView {
 export interface PoolSummary {
   id: string;
   name: string;
-  description: string | null;
+  description: string | null; // internal (members)
+  inviteDescription: string | null; // shown on the invite page
   visibility: PoolVisibility;
   tournament: TournamentSummary;
   myRole: PoolMemberRole;

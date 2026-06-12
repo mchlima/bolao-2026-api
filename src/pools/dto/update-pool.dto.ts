@@ -14,6 +14,11 @@ export class UpdatePoolDto {
   description?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  inviteDescription?: string;
+
+  @IsOptional()
   @IsEnum(PoolVisibility)
   visibility?: PoolVisibility;
 }
