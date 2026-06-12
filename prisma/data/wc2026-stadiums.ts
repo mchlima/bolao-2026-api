@@ -10,24 +10,24 @@ export interface StadiumSeed {
 
 export const WC2026_STADIUMS: StadiumSeed[] = [
   // ── United States (11) ──
-  { name: 'MetLife Stadium', city: 'East Rutherford', state: 'New Jersey', country: 'Estados Unidos' },
-  { name: 'AT&T Stadium', city: 'Arlington', state: 'Texas', country: 'Estados Unidos' },
-  { name: 'NRG Stadium', city: 'Houston', state: 'Texas', country: 'Estados Unidos' },
-  { name: 'Mercedes-Benz Stadium', city: 'Atlanta', state: 'Geórgia', country: 'Estados Unidos' },
-  { name: 'Hard Rock Stadium', city: 'Miami Gardens', state: 'Flórida', country: 'Estados Unidos' },
-  { name: 'Gillette Stadium', city: 'Foxborough', state: 'Massachusetts', country: 'Estados Unidos' },
-  { name: 'Lincoln Financial Field', city: 'Filadélfia', state: 'Pensilvânia', country: 'Estados Unidos' },
-  { name: 'Lumen Field', city: 'Seattle', state: 'Washington', country: 'Estados Unidos' },
-  { name: "Levi's Stadium", city: 'Santa Clara', state: 'Califórnia', country: 'Estados Unidos' },
-  { name: 'SoFi Stadium', city: 'Inglewood', state: 'Califórnia', country: 'Estados Unidos' },
-  { name: 'Arrowhead Stadium', city: 'Kansas City', state: 'Missouri', country: 'Estados Unidos' },
+  { name: 'MetLife Stadium', city: 'East Rutherford', state: 'New Jersey', country: 'United States' },
+  { name: 'AT&T Stadium', city: 'Arlington', state: 'Texas', country: 'United States' },
+  { name: 'NRG Stadium', city: 'Houston', state: 'Texas', country: 'United States' },
+  { name: 'Mercedes-Benz Stadium', city: 'Atlanta', state: 'Georgia', country: 'United States' },
+  { name: 'Hard Rock Stadium', city: 'Miami Gardens', state: 'Florida', country: 'United States' },
+  { name: 'Gillette Stadium', city: 'Foxborough', state: 'Massachusetts', country: 'United States' },
+  { name: 'Lincoln Financial Field', city: 'Philadelphia', state: 'Pennsylvania', country: 'United States' },
+  { name: 'Lumen Field', city: 'Seattle', state: 'Washington', country: 'United States' },
+  { name: "Levi's Stadium", city: 'Santa Clara', state: 'California', country: 'United States' },
+  { name: 'SoFi Stadium', city: 'Inglewood', state: 'California', country: 'United States' },
+  { name: 'Arrowhead Stadium', city: 'Kansas City', state: 'Missouri', country: 'United States' },
 
   // ── Canada (2) ──
-  { name: 'BMO Field', city: 'Toronto', state: 'Ontário', country: 'Canadá' },
-  { name: 'BC Place', city: 'Vancouver', state: 'Colúmbia Britânica', country: 'Canadá' },
+  { name: 'BMO Field', city: 'Toronto', state: 'Ontario', country: 'Canada' },
+  { name: 'BC Place', city: 'Vancouver', state: 'British Columbia', country: 'Canada' },
 
   // ── Mexico (3) ──
-  { name: 'Estádio Azteca', city: 'Cidade do México', state: 'Cidade do México', country: 'México' },
-  { name: 'Estádio Akron', city: 'Guadalajara', state: 'Jalisco', country: 'México' },
-  { name: 'Estádio BBVA', city: 'Monterrey', state: 'Nuevo León', country: 'México' },
+  { name: 'Estádio Azteca', city: 'Mexico City', state: 'Mexico City', country: 'Mexico' },
+  { name: 'Estádio Akron', city: 'Guadalajara', state: 'Jalisco', country: 'Mexico' },
+  { name: 'Estádio BBVA', city: 'Monterrey', state: 'Nuevo León', country: 'Mexico' },
 ];
