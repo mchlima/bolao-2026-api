@@ -1,4 +1,5 @@
 import { PoolMemberRole, PoolVisibility } from '@prisma/client';
+import { ScoreTier } from '../scoring/scoring.service';
 
 export interface TournamentSummary {
   id: string;
@@ -46,4 +47,22 @@ export interface JoinPreview {
   tournament: TournamentSummary;
   memberCount: number;
   alreadyMember: boolean;
+}
+
+export interface PoolMatchPredictionEntry {
+  user: { id: string; name: string };
+  prediction: { home: number; away: number };
+  points?: number; // present once the match is scored (LIVE/FINISHED)
+  tier?: ScoreTier;
+}
+
+/**
+ * Members' predictions for one match in a pool. `revealed` is false until the
+ * match starts (kickoff) — before that, only the requester's OWN prediction is
+ * returned, so nobody can peek at others' guesses before betting (same fairness
+ * rule as the prediction lock).
+ */
+export interface PoolMatchPredictionsView {
+  revealed: boolean;
+  entries: PoolMatchPredictionEntry[];
 }

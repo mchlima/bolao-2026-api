@@ -26,6 +26,7 @@ import type {
   JoinPreview,
   PoolDetail,
   PoolInviteView,
+  PoolMatchPredictionsView,
   PoolSummary,
 } from './pool.types';
 import { PoolsService } from './pools.service';
@@ -191,5 +192,15 @@ export class PoolsController {
     @Param('matchId') matchId: string,
   ): Promise<MatchRankingResponse> {
     return this.pools.matchRanking(id, matchId, user.id);
+  }
+
+  // Each member's prediction for a match (others hidden until kickoff).
+  @Get(':id/matches/:matchId/predictions')
+  matchPredictions(
+    @CurrentUser() user: SafeUser,
+    @Param('id') id: string,
+    @Param('matchId') matchId: string,
+  ): Promise<PoolMatchPredictionsView> {
+    return this.pools.matchPredictions(id, matchId, user.id);
   }
 }

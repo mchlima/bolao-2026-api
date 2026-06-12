@@ -21,6 +21,7 @@ import {
   JoinPreview,
   PoolDetail,
   PoolInviteView,
+  PoolMatchPredictionsView,
   PoolSummary,
 } from './pool.types';
 
@@ -447,6 +448,74 @@ export class PoolsService {
     await this.requireMembership(poolId, userId);
     const memberIds = await this.memberUserIds(poolId);
     return this.rankings.matchRanking(matchId, userId, memberIds);
+  }
+
+  /**
+   * Each member's prediction for one match. PRIVACY: until kickoff, only the
+   * requester's own prediction is returned (`revealed: false`) — nobody peeks
+   * at others' guesses before the match starts. Enforced here, not just in UI.
+   */
+  async matchPredictions(
+    poolId: string,
+    matchId: string,
+    userId: string,
+  ): Promise<PoolMatchPredictionsView> {
+    await this.requireMembership(poolId, userId);
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      select: { id: true, kickoffAt: true, status: true },
+    });
+    if (!match) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Partida não encontrada.',
+      });
+    }
+
+    // Revealed once the match starts: kickoff passed, or it's no longer SCHEDULED.
+    const revealed =
+      new Date() >= match.kickoffAt || match.status !== 'SCHEDULED';
+
+    if (revealed) {
+      const memberIds = await this.memberUserIds(poolId);
+      const ranking = await this.rankings.matchRanking(
+        matchId,
+        userId,
+        memberIds,
+      );
+      return {
+        revealed: true,
+        entries: ranking.entries
+          .filter((e) => e.prediction)
+          .map((e) => ({
+            user: e.user,
+            prediction: e.prediction!,
+            points: e.points,
+            tier: e.tier,
+          })),
+      };
+    }
+
+    // Hidden: only the requester's own prediction (if any).
+    const own = await this.prisma.prediction.findUnique({
+      where: { userId_matchId: { userId, matchId } },
+      select: {
+        homeScore: true,
+        awayScore: true,
+        user: { select: { id: true, name: true } },
+      },
+    });
+    return {
+      revealed: false,
+      entries: own
+        ? [
+            {
+              user: own.user,
+              prediction: { home: own.homeScore, away: own.awayScore },
+            },
+          ]
+        : [],
+    };
   }
 
   // ─────────────────────────────────────────────── Internals
