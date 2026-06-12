@@ -85,6 +85,26 @@ const REGIONS: Record<string, { country: string; slugs: string[] }[]> = {
     { country: 'Irlanda', slugs: ['irl.1'] },
     { country: 'País de Gales', slugs: ['wal.1'] },
   ],
+  asia: [
+    { country: 'Arábia Saudita', slugs: ['ksa.1'] },
+    { country: 'Japão', slugs: ['jpn.1'] },
+    { country: 'China', slugs: ['chn.1'] },
+    { country: 'Austrália', slugs: ['aus.1'] },
+    { country: 'Indonésia', slugs: ['idn.1'] },
+    { country: 'Índia', slugs: ['ind.1', 'ind.2'] },
+    { country: 'Tailândia', slugs: ['tha.1'] },
+    { country: 'Malásia', slugs: ['mys.1'] },
+    { country: 'Singapura', slugs: ['sgp.1'] },
+  ],
+  africa: [
+    { country: 'África do Sul', slugs: ['rsa.1', 'rsa.2'] },
+    { country: 'Nigéria', slugs: ['nga.1'] },
+    { country: 'Gana', slugs: ['gha.1'] },
+    { country: 'Quênia', slugs: ['ken.1'] },
+    { country: 'Uganda', slugs: ['uga.1'] },
+    { country: 'Zâmbia', slugs: ['zam.1'] },
+    { country: 'Zimbábue', slugs: ['zim.1'] },
+  ],
 };
 
 interface EspnTeam {
