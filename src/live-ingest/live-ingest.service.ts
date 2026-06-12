@@ -14,6 +14,9 @@ const RANK: Record<string, number> = { SCHEDULED: 0, LIVE: 1, FINISHED: 2 };
 
 const START_WINDOW_MIN = 15; // start polling this many minutes before kickoff
 const END_WINDOW_HOURS = 3; // ...until this long after kickoff
+// Keep reconciling a just-FINISHED match this long after its last change, to
+// catch an immediate official/VAR score correction — then it goes idle again.
+const POST_FINISH_RECONCILE_MIN = 5;
 
 // Tick cadence (6-field cron, with seconds). 15s gives ~15s worst-case
 // detection of a kickoff or goal while staying gentle on ESPN's unofficial
@@ -72,6 +75,13 @@ export class LiveIngestService {
             kickoffAt: {
               gte: new Date(now.getTime() - START_WINDOW_MIN * 60_000),
               lte: new Date(now.getTime() + END_WINDOW_HOURS * 3_600_000),
+            },
+          },
+          {
+            // Recently finished: catch a late official correction, then go idle.
+            status: 'FINISHED',
+            updatedAt: {
+              gte: new Date(now.getTime() - POST_FINISH_RECONCILE_MIN * 60_000),
             },
           },
         ],

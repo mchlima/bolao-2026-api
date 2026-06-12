@@ -3,32 +3,33 @@ import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsService } from '../events/events.service';
 
-// Tick cadence (6-field cron, with seconds). 20s keeps the prediction lock
-// within ~20s of kickoff while costing just one indexed query per tick.
-const TICK_CRON = '*/20 * * * * *';
+// Tick cadence (6-field cron, with seconds). 10s keeps the prediction lock and
+// the cross-instance sync within ~10s, costing two indexed queries per tick.
+const TICK_CRON = '*/10 * * * * *';
 
 /**
- * Emits realtime events at the *time-based* edges that no DB write produces.
+ * Emits realtime events that the in-process writers can't, for the SSE clients
+ * connected to THIS instance:
  *
- * A match's prediction window closes automatically at kickoff —
- * `PredictionsService.acceptsPredictions` returns false once `now >= kickoffAt`
- * for a SCHEDULED match with no admin override. That edge is pure time: nothing
- * mutates the row, so the admin/robot/upsert emitters never fire for it, and
- * every screen still showing a bet form (home "próximas partidas", tournament,
- * match detail) keeps it open until some unrelated event happens to refetch.
+ *  1. Prediction window closing at kickoff — a purely time-based edge
+ *     (`acceptsPredictions` flips at kickoff) that writes nothing to the DB, so
+ *     the admin/upsert/ESPN-robot emitters never fire for it. Without this, a
+ *     screen still showing a bet form keeps it open past kickoff.
  *
- * This cron watches for matches crossing that boundary since the previous tick
- * and emits their match + tournament rooms, so every subscribed screen refetches
- * and locks the form. Runs in all environments (predictions close in dev too,
- * which shares the same DB) — each instance only notifies its own SSE clients.
+ *  2. Cross-instance changes — the event bus is in-process and the ESPN robot
+ *     only runs in production, so a second instance sharing the same DB (e.g.
+ *     dev) never sees the robot's score/status writes. We poll `updatedAt` and
+ *     re-emit so every instance notifies its own clients no matter who wrote.
  *
- * The actual LIVE/FINISHED + score transitions already emit (ESPN robot in prod,
- * admin edits elsewhere), so this only fills the open→closed gap.
+ * Runs in all environments. A server restart resets the cursors to "now" (no
+ * backfill storm) and dropped SSE clients resync on reconnect, so a restart that
+ * lands exactly on a kickoff is self-healing rather than a missed edge.
  */
 @Injectable()
 export class MatchWindowService {
   private readonly logger = new Logger(MatchWindowService.name);
   private lastTick = new Date();
+  private lastSeenUpdate = new Date();
   private running = false;
 
   constructor(
@@ -43,31 +44,49 @@ export class MatchWindowService {
     const since = this.lastTick;
     const now = new Date();
     try {
-      // Matches whose auto prediction window closed in (since, now]: SCHEDULED,
-      // no admin override (predictionsOpen wins when set), both teams known.
-      const closed = await this.prisma.match.findMany({
-        where: {
-          status: 'SCHEDULED',
-          predictionsOpen: null,
-          homeTeamId: { not: null },
-          awayTeamId: { not: null },
-          kickoffAt: { gt: since, lte: now },
-        },
-        select: { id: true, tournamentId: true },
-      });
-      for (const m of closed) {
-        this.events.emit(`match:${m.id}`, `tournament:${m.tournamentId}`);
-      }
-      if (closed.length > 0) {
-        this.logger.log(
-          `predictions closed at kickoff for ${closed.length} match(es)`,
-        );
-      }
+      await this.emitKickoffCloses(since, now);
+      await this.emitExternalUpdates();
     } catch (e) {
       this.logger.warn(`tick failed: ${(e as Error).message}`);
     } finally {
       this.lastTick = now;
       this.running = false;
+    }
+  }
+
+  /** (1) Matches whose auto window closed in (since, now]: SCHEDULED, not closed
+   * early by an admin (predictionsOpen null or true), both teams set. */
+  private async emitKickoffCloses(since: Date, now: Date): Promise<void> {
+    const closed = await this.prisma.match.findMany({
+      where: {
+        status: 'SCHEDULED',
+        OR: [{ predictionsOpen: null }, { predictionsOpen: true }],
+        homeTeamId: { not: null },
+        awayTeamId: { not: null },
+        kickoffAt: { gt: since, lte: now },
+      },
+      select: { id: true, tournamentId: true },
+    });
+    for (const m of closed) {
+      this.events.emit(`match:${m.id}`, `tournament:${m.tournamentId}`);
+    }
+    if (closed.length > 0) {
+      this.logger.log(
+        `predictions closed at kickoff for ${closed.length} match(es)`,
+      );
+    }
+  }
+
+  /** (2) Matches written since we last looked (by any instance) — re-emit so
+   * this instance's SSE clients refetch even when another process did the write. */
+  private async emitExternalUpdates(): Promise<void> {
+    const updated = await this.prisma.match.findMany({
+      where: { updatedAt: { gt: this.lastSeenUpdate } },
+      select: { id: true, tournamentId: true, updatedAt: true },
+    });
+    for (const m of updated) {
+      this.events.emit(`match:${m.id}`, `tournament:${m.tournamentId}`);
+      if (m.updatedAt > this.lastSeenUpdate) this.lastSeenUpdate = m.updatedAt;
     }
   }
 }

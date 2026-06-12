@@ -101,17 +101,22 @@ export class PredictionsService {
   }
 
   /**
-   * Whether a match accepts predictions. The admin override (predictionsOpen)
-   * wins when set; otherwise the automatic rule applies (SCHEDULED + before
-   * kickoff). Terminal states (finished/cancelled) never accept predictions,
-   * even with the override on. Both teams must be set.
+   * Whether a match accepts predictions. Predictions ALWAYS close at kickoff:
+   * the admin override (predictionsOpen) can only close the window EARLY
+   * (false) — it can never hold it open once the match has started, so nobody
+   * bets with the live score in front of them. Finished/cancelled matches and a
+   * missing team also close it. Before kickoff, a SCHEDULED match is open unless
+   * the admin closed it early.
    */
   static acceptsPredictions(match: Match): boolean {
     if (match.homeTeamId == null || match.awayTeamId == null) return false;
     if (match.status === 'FINISHED' || match.status === 'CANCELLED')
       return false;
-    const auto = match.status === 'SCHEDULED' && new Date() < match.kickoffAt;
-    return match.predictionsOpen ?? auto;
+    // Hard gate: once kickoff passes (or the match is no longer SCHEDULED), the
+    // window is closed regardless of the override.
+    if (new Date() >= match.kickoffAt) return false;
+    if (match.status !== 'SCHEDULED') return false;
+    return match.predictionsOpen ?? true;
   }
 
   private assertOpenForPrediction(match: Match): void {

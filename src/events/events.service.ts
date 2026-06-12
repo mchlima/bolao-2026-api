@@ -22,7 +22,12 @@ export class EventsService {
     for (const r of rooms) if (r) this.pending.add(r);
     if (this.timer) return;
     this.timer = setInterval(() => {
-      if (this.pending.size === 0) return;
+      if (this.pending.size === 0) {
+        // Idle: stop the timer; the next emit() starts a fresh one.
+        if (this.timer) clearInterval(this.timer);
+        this.timer = null;
+        return;
+      }
       for (const room of this.pending) this.subject.next({ room });
       this.pending.clear();
     }, 2000);
