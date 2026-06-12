@@ -27,7 +27,7 @@ export const WC2026_STADIUMS: StadiumSeed[] = [
   { name: 'BC Place', city: 'Vancouver', state: 'British Columbia', country: 'Canada' },
 
   // ── Mexico (3) ──
-  { name: 'Estádio Azteca', city: 'Mexico City', state: 'Mexico City', country: 'Mexico' },
-  { name: 'Estádio Akron', city: 'Guadalajara', state: 'Jalisco', country: 'Mexico' },
-  { name: 'Estádio BBVA', city: 'Monterrey', state: 'Nuevo León', country: 'Mexico' },
+  { name: 'Estadio Azteca', city: 'Mexico City', state: 'Mexico City', country: 'Mexico' },
+  { name: 'Estadio Akron', city: 'Guadalajara', state: 'Jalisco', country: 'Mexico' },
+  { name: 'Estadio BBVA', city: 'Monterrey', state: 'Nuevo León', country: 'Mexico' },
 ];
