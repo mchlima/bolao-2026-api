@@ -22,6 +22,9 @@ export interface RankingResponse {
 export interface MatchRankingResponse extends RankingResponse {
   provisional: boolean; // true while the match is LIVE
   result: { home: number; away: number } | null;
+  // False until kickoff: others' predictions are hidden (only the caller sees
+  // their own), so nobody peeks at guesses before betting. entries is empty.
+  revealed: boolean;
 }
 
 export interface EngagementResponse {
@@ -142,7 +145,13 @@ export class RankingsService {
   ): Promise<MatchRankingResponse> {
     const match = await this.prisma.match.findUnique({
       where: { id: matchId },
-      select: { id: true, status: true, homeScore: true, awayScore: true },
+      select: {
+        id: true,
+        status: true,
+        homeScore: true,
+        awayScore: true,
+        kickoffAt: true,
+      },
     });
     if (!match) {
       throw new NotFoundException({
@@ -171,6 +180,35 @@ export class RankingsService {
         user: { select: { id: true, name: true, isActive: true } },
       },
     });
+    const active = predictions.filter((p) => p.user.isActive);
+
+    // Predictions are secret until kickoff (same fairness rule as the lock).
+    // Before that, return the count but hide everyone's guesses — the caller
+    // still gets their own (for the "your prediction" UI).
+    const revealed = playing || new Date() >= match.kickoffAt;
+    if (!revealed) {
+      const own = active.find((p) => p.userId === currentUserId);
+      const ownEntry: Acc[] = own
+        ? [
+            {
+              user: { id: own.user.id, name: own.user.name },
+              points: 0,
+              exact: 0,
+              scored: 0,
+              prediction: { home: own.homeScore, away: own.awayScore },
+              predictedAt: own.createdAt.getTime(),
+            },
+          ]
+        : [];
+      return {
+        entries: [],
+        currentUser: this.buildResponse(ownEntry, currentUserId).currentUser,
+        totalParticipants: active.length,
+        provisional: false,
+        result: null,
+        revealed: false,
+      };
+    }
 
     const entries: Acc[] = [];
     for (const p of predictions) {
@@ -200,6 +238,7 @@ export class RankingsService {
       ...this.buildResponse(entries, currentUserId),
       provisional: match.status === 'LIVE',
       result,
+      revealed: true,
     };
   }
 
