@@ -16,9 +16,9 @@ const START_WINDOW_MIN = 15; // start polling this many minutes before kickoff
 const END_WINDOW_HOURS = 3; // ...until this long after kickoff
 
 /**
- * ESPN robot: every minute it auto-advances match status (SCHEDULED → LIVE →
+ * ESPN robot: every 30s it auto-advances match status (SCHEDULED → LIVE →
  * FINISHED) and live score from the ESPN scoreboard. Polls only inside a match
- * window; runs every minute while a match is LIVE, else scans every 5 minutes.
+ * window; runs every 30s while a match is LIVE, else scans every 5 minutes.
  * Skips matches an admin took over (autoManaged=false), cancelled ones, and
  * knockout slots without both teams. ESPN status is the source of truth.
  */
@@ -33,7 +33,7 @@ export class LiveIngestService {
     private readonly events: EventsService,
   ) {}
 
-  @Cron(CronExpression.EVERY_MINUTE)
+  @Cron(CronExpression.EVERY_30_SECONDS)
   async tick(): Promise<void> {
     // Only the production instance drives the robot (dev shares the same DB).
     if (process.env.NODE_ENV !== 'production') return;
@@ -53,7 +53,7 @@ export class LiveIngestService {
     const liveCount = await this.prisma.match.count({
       where: { status: 'LIVE', autoManaged: true },
     });
-    // Every minute while something is live; otherwise only every 5 minutes.
+    // Every 30s while something is live; otherwise only scan on the 5-min mark.
     if (liveCount === 0 && now.getMinutes() % 5 !== 0) return;
 
     const candidates = await this.prisma.match.findMany({
