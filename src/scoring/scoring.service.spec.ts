@@ -71,11 +71,18 @@ describe('ScoringService (Model B — proximity)', () => {
       points: 4,
     },
     {
-      name: 'right team count but wrong winner',
+      name: 'one team exact but wrong winner (consolation)',
       pred: [2, 3],
       result: [2, 1],
-      tier: 'NONE',
-      points: 0,
+      tier: 'TEAM_GOALS',
+      points: 1,
+    },
+    {
+      name: 'Fagner: 2x1 on a 0x1 — away goals exact, wrong winner',
+      pred: [2, 1],
+      result: [0, 1],
+      tier: 'TEAM_GOALS',
+      points: 1,
     },
     { name: 'nothing', pred: [0, 2], result: [2, 0], tier: 'NONE', points: 0 },
   ];
@@ -92,10 +99,28 @@ describe('ScoringService (Model B — proximity)', () => {
     },
   );
 
-  it('outcome is the gate — exact team count with wrong winner scores 0', () => {
-    expect(service.tierFor({ home: 2, away: 3 }, { home: 2, away: 1 })).toBe(
+  it('outcome is the gate — wrong winner with no exact team scores 0', () => {
+    expect(service.tierFor({ home: 0, away: 2 }, { home: 2, away: 0 })).toBe(
       'NONE',
     );
+  });
+
+  it('wrong winner but one exact team goal → consolation below base', () => {
+    const r = service.score({ home: 2, away: 3 }, { home: 2, away: 1 });
+    expect(r.tier).toBe('TEAM_GOALS');
+    expect(r.points).toBe(1);
+    // never beats getting the outcome right (which earns base = 4)
+    expect(r.points).toBeLessThan(4);
+  });
+
+  it('honors SCORING_TEAM_EXACT_MISS override', () => {
+    const custom = new ScoringService({
+      get: (k: string) =>
+        k === 'SCORING_TEAM_EXACT_MISS' ? '2' : undefined,
+    } as unknown as ConfigService);
+    expect(
+      custom.score({ home: 2, away: 3 }, { home: 2, away: 1 }).points,
+    ).toBe(2);
   });
 
   it('honors env overrides for the point components', () => {
