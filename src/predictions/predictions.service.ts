@@ -62,7 +62,10 @@ export class PredictionsService {
       },
     });
 
-    this.events.emit(`match:${dto.matchId}`, `tournament:${match.tournamentId}`);
+    this.events.emit(
+      `match:${dto.matchId}`,
+      `tournament:${match.tournamentId}`,
+    );
     return this.findOneForUser(userId, dto.matchId);
   }
 
@@ -105,7 +108,8 @@ export class PredictionsService {
    */
   static acceptsPredictions(match: Match): boolean {
     if (match.homeTeamId == null || match.awayTeamId == null) return false;
-    if (match.status === 'FINISHED' || match.status === 'CANCELLED') return false;
+    if (match.status === 'FINISHED' || match.status === 'CANCELLED')
+      return false;
     const auto = match.status === 'SCHEDULED' && new Date() < match.kickoffAt;
     return match.predictionsOpen ?? auto;
   }
@@ -127,12 +131,13 @@ export class PredictionsService {
 
   private withScore(prediction: PredictionWithMatch): PredictionView {
     const m = prediction.match;
-    const scorable =
-      m.status !== 'CANCELLED' && m.homeScore != null && m.awayScore != null;
+    // Scores default to 0x0, so "has a result" is driven by status, not by a
+    // null score: only LIVE (provisional) or FINISHED matches are scored.
+    const scorable = m.status === 'LIVE' || m.status === 'FINISHED';
     const score = scorable
       ? this.scoring.score(
           { home: prediction.homeScore, away: prediction.awayScore },
-          { home: m.homeScore as number, away: m.awayScore as number },
+          { home: m.homeScore, away: m.awayScore },
         )
       : null;
     return { ...prediction, score };

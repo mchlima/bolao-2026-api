@@ -130,8 +130,8 @@ model Match {
   stadiumId    String?
   kickoffAt    DateTime
   status       MatchStatus @default(SCHEDULED)
-  homeScore    Int? // nullable until a score exists
-  awayScore    Int?
+  homeScore    Int @default(0) // matches default to 0x0; never null
+  awayScore    Int @default(0)
   phaseLabel   String? // free text stage: "Fase de Grupos", "Oitavas de final"...
   groupName    String? // "A".."L" for the group stage
   matchNumber  Int? // official fixture number within the tournament (1..N)
