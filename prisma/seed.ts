@@ -95,11 +95,11 @@ async function seedWorldCup(): Promise<void> {
     const stadiumId = stadiumByName.get(m.venue);
     if (!stadiumId) throw new Error(`Seed: stadium not found "${m.venue}"`);
     const offset = VENUE_UTC_OFFSET[m.venue] ?? '+00:00';
-    // Research-derived local kickoff times were ~1h early (user-confirmed against the
-    // official schedule); shift +1h. Times remain best-effort (decision #14) — admin can fine-tune.
-    const kickoffAt = new Date(
-      new Date(`${m.date}T${m.time}:00${offset}`).getTime() + 60 * 60 * 1000,
-    );
+    // Kickoff = venue-local time at the venue's UTC offset. (A previous +1h
+    // "correction" was a bug — it put every match 1h late vs the official/ESPN
+    // schedule, so it was removed. The live DB times were reconciled against the
+    // ESPN schedule, which is the source of truth; admin can still fine-tune.)
+    const kickoffAt = new Date(`${m.date}T${m.time}:00${offset}`);
 
     const matchData = {
       tournamentId: tournament.id,
