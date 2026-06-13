@@ -6,7 +6,7 @@ export interface EspnEvent {
   dateIso: string;
   state: 'pre' | 'in' | 'post';
   statusName: string; // e.g. STATUS_SCHEDULED, STATUS_IN_PROGRESS, STATUS_FINAL, STATUS_POSTPONED
-  /** Goal count keyed by team abbreviation (matches our Team.shortName). */
+  /** Goal count keyed by team abbreviation (matches our Team.espnAbbr). */
   scores: Record<string, number>;
   abbrs: string[];
 }

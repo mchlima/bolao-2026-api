@@ -1,5 +1,5 @@
-// 16 venues of the 2026 FIFA World Cup (USA · Canada · Mexico).
-// state = US state / Canadian province / Mexican state.
+// 16 sedes da Copa do Mundo FIFA 2026 (EUA · Canadá · México), em pt-BR.
+// state = estado dos EUA / província canadense / estado mexicano.
 
 export interface StadiumSeed {
   name: string;
@@ -9,25 +9,25 @@ export interface StadiumSeed {
 }
 
 export const WC2026_STADIUMS: StadiumSeed[] = [
-  // ── United States (11) ──
-  { name: 'MetLife Stadium', city: 'East Rutherford', state: 'New Jersey', country: 'United States' },
-  { name: 'AT&T Stadium', city: 'Arlington', state: 'Texas', country: 'United States' },
-  { name: 'NRG Stadium', city: 'Houston', state: 'Texas', country: 'United States' },
-  { name: 'Mercedes-Benz Stadium', city: 'Atlanta', state: 'Georgia', country: 'United States' },
-  { name: 'Hard Rock Stadium', city: 'Miami Gardens', state: 'Florida', country: 'United States' },
-  { name: 'Gillette Stadium', city: 'Foxborough', state: 'Massachusetts', country: 'United States' },
-  { name: 'Lincoln Financial Field', city: 'Philadelphia', state: 'Pennsylvania', country: 'United States' },
-  { name: 'Lumen Field', city: 'Seattle', state: 'Washington', country: 'United States' },
-  { name: "Levi's Stadium", city: 'Santa Clara', state: 'California', country: 'United States' },
-  { name: 'SoFi Stadium', city: 'Inglewood', state: 'California', country: 'United States' },
-  { name: 'Arrowhead Stadium', city: 'Kansas City', state: 'Missouri', country: 'United States' },
+  // ── Estados Unidos (11) ──
+  { name: 'MetLife Stadium', city: 'East Rutherford', state: 'New Jersey', country: 'Estados Unidos' },
+  { name: 'AT&T Stadium', city: 'Arlington', state: 'Texas', country: 'Estados Unidos' },
+  { name: 'NRG Stadium', city: 'Houston', state: 'Texas', country: 'Estados Unidos' },
+  { name: 'Mercedes-Benz Stadium', city: 'Atlanta', state: 'Georgia', country: 'Estados Unidos' },
+  { name: 'Hard Rock Stadium', city: 'Miami Gardens', state: 'Florida', country: 'Estados Unidos' },
+  { name: 'Gillette Stadium', city: 'Foxborough', state: 'Massachusetts', country: 'Estados Unidos' },
+  { name: 'Lincoln Financial Field', city: 'Filadélfia', state: 'Pennsylvania', country: 'Estados Unidos' },
+  { name: 'Lumen Field', city: 'Seattle', state: 'Washington', country: 'Estados Unidos' },
+  { name: "Levi's Stadium", city: 'Santa Clara', state: 'California', country: 'Estados Unidos' },
+  { name: 'SoFi Stadium', city: 'Inglewood', state: 'California', country: 'Estados Unidos' },
+  { name: 'Arrowhead Stadium', city: 'Kansas City', state: 'Missouri', country: 'Estados Unidos' },
 
-  // ── Canada (2) ──
-  { name: 'BMO Field', city: 'Toronto', state: 'Ontario', country: 'Canada' },
-  { name: 'BC Place', city: 'Vancouver', state: 'British Columbia', country: 'Canada' },
+  // ── Canadá (2) ──
+  { name: 'BMO Field', city: 'Toronto', state: 'Ontário', country: 'Canadá' },
+  { name: 'BC Place', city: 'Vancouver', state: 'Colúmbia Britânica', country: 'Canadá' },
 
-  // ── Mexico (3) ──
-  { name: 'Estadio Azteca', city: 'Mexico City', state: 'Mexico City', country: 'Mexico' },
-  { name: 'Estadio Akron', city: 'Guadalajara', state: 'Jalisco', country: 'Mexico' },
-  { name: 'Estadio BBVA', city: 'Monterrey', state: 'Nuevo León', country: 'Mexico' },
+  // ── México (3) ──
+  { name: 'Estádio Azteca', city: 'Cidade do México', state: 'Cidade do México', country: 'México' },
+  { name: 'Estádio Akron', city: 'Guadalajara', state: 'Jalisco', country: 'México' },
+  { name: 'Estádio BBVA', city: 'Monterrey', state: 'Nuevo León', country: 'México' },
 ];

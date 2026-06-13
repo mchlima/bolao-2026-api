@@ -315,7 +315,11 @@ model Tie {
 model Team {
   id          String   @id @default(cuid())
   name        String
-  shortName   String // sigla
+  shortName   String // sigla de EXIBIÇÃO (pode ser pt-BR, ex.: EUA, ALE, COR)
+  // ESPN team abbreviation — the key the live-ingest robot matches scores by
+  // (ESPN keys goals by abbreviation). Kept stable in ESPN's codes so shortName
+  // is free to be localized without breaking score ingestion. Backfilled = shortName.
+  espnAbbr    String?
   type        TeamType
   // NATIONAL_TEAM:
   // ISO 3166-1 alpha-2 (drives country-flag-icons); GB-ENG/GB-SCT/GB-WLS/GB-NIR for UK nations.

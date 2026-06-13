@@ -1,6 +1,6 @@
 /**
- * Enriches NATIONAL_TEAM rows with ESPN data: espnId, brand colors, English name
- * and ESPN abbreviation (per decision), and the crest (default + dark) stored in
+ * Enriches NATIONAL_TEAM rows with ESPN data: espnId, brand colors, a pt-BR
+ * localized name and ESPN abbreviation, and the crest (default + dark) stored in
  * R2. National teams are aggregated from the WC-qualifier and continental
  * competitions (dedup by ESPN id). Idempotent: crests are only fetched when
  * missing. Existing rows are matched by abbreviation, with a small reconciliation
@@ -10,8 +10,8 @@
  *
  *   ts-node --project prisma/tsconfig.seed.json prisma/seed-national-teams.ts
  *
- * Note: prisma/seed.ts still holds the pt-BR national-team names and would revert
- * name/shortName if re-run — this enrichment is the canonical ESPN-aligned step.
+ * Names are localized to pt-BR (see ptBrName) from the ISO country code via ICU,
+ * not taken from ESPN's English displayName — so re-running keeps Portuguese names.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -37,6 +37,38 @@ const s3 = new S3Client({
 });
 const BUCKET = process.env.STORAGE_BUCKET ?? '';
 const PUBLIC = (process.env.STORAGE_PUBLIC_BASE_URL ?? '').replace(/\/$/, '');
+
+// pt-BR national-team names: ICU (Intl.DisplayNames) keyed by the ISO country
+// code, with football-convention overrides for cases ICU gets wrong or names
+// differently (UK home nations, Chinese Taipei, Czechia, the two Congos, …).
+const PT_REGION = new Intl.DisplayNames(['pt-BR'], { type: 'region' });
+const NAME_OVERRIDE: Record<string, string> = {
+  ENG: 'Inglaterra', SCO: 'Escócia', WAL: 'País de Gales', NIR: 'Irlanda do Norte',
+  TPE: 'Taipé Chinesa', CZE: 'República Tcheca', KOS: 'Kosovo',
+  CIV: 'Costa do Marfim', COD: 'República Democrática do Congo', CGO: 'República do Congo',
+  KOR: 'Coreia do Sul', PRK: 'Coreia do Norte', NED: 'Países Baixos', GUA: 'Guam',
+};
+// Display sigla in pt-BR (Brazilian-TV convention) where it differs from ESPN's
+// abbreviation. Keyed by ESPN abbreviation; absent = keep ESPN's code. The ESPN
+// code itself lives on espnAbbr (the robot's match key), so this is display-only.
+const SIGLA_PT: Record<string, string> = {
+  USA: 'EUA', GER: 'ALE', NED: 'HOL', ENG: 'ING', SCO: 'ESC', WAL: 'GAL',
+  KOR: 'COR', PRK: 'CRN', CZE: 'TCH', RSA: 'AFS', KSA: 'ARA', UAE: 'EAU',
+  CIV: 'CDM', JPN: 'JAP', EGY: 'EGI', DEN: 'DIN', SWE: 'SUE', ECU: 'EQU',
+  UKR: 'UCR', SRB: 'SER', ROU: 'ROM', QAT: 'CAT', IRN: 'IRA',
+};
+function ptBrName(abbr: string, countryCode: string | null, fallback: string): string {
+  if (NAME_OVERRIDE[abbr]) return NAME_OVERRIDE[abbr];
+  if (countryCode) {
+    try {
+      const r = PT_REGION.of(countryCode);
+      if (r && r !== countryCode) return r;
+    } catch {
+      /* non-ISO code (e.g. GB-ENG) — fall through to the English fallback */
+    }
+  }
+  return fallback;
+}
 
 // Aggregate every national team across these competitions (dedup by ESPN id).
 const COMPETITIONS = [
@@ -125,9 +157,10 @@ async function run(): Promise<void> {
 
   const ours = await prisma.team.findMany({
     where: { type: TeamType.NATIONAL_TEAM },
-    select: { id: true, shortName: true, countryCode: true, logoUrl: true, logoDarkUrl: true },
+    select: { id: true, shortName: true, espnAbbr: true, countryCode: true, logoUrl: true, logoDarkUrl: true },
   });
-  const byAbbr = new Map(ours.map((o) => [o.shortName.toUpperCase(), o]));
+  // Match ESPN abbreviation against our espnAbbr (shortName may be localized pt-BR).
+  const byAbbr = new Map(ours.map((o) => [(o.espnAbbr ?? o.shortName).toUpperCase(), o]));
   const byCC = new Map(ours.filter((o) => o.countryCode).map((o) => [o.countryCode!, o]));
 
   let updated = 0, created = 0, crests = 0, failed = 0;
@@ -143,9 +176,11 @@ async function run(): Promise<void> {
       if (!logoUrl && def) { logoUrl = await uploadCrest(def); if (logoUrl) crests++; }
       if (!logoDarkUrl && dark) { logoDarkUrl = await uploadCrest(dark); if (logoDarkUrl) crests++; }
 
+      const cc = row?.countryCode ?? NEW_CC[abbr] ?? null;
       const data = {
-        name: t.displayName, // ESPN English name (decision)
-        shortName: abbr, // ESPN abbreviation (decision)
+        name: ptBrName(abbr, cc, t.displayName), // pt-BR via ICU + overrides
+        shortName: SIGLA_PT[abbr] ?? abbr, // pt-BR display sigla (fallback ESPN)
+        espnAbbr: abbr, // ESPN abbreviation — robot's stable match key
         espnId: t.id,
         color: t.color ?? null,
         colorAlt: t.alternateColor ?? null,

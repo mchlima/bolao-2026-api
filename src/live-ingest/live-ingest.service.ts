@@ -96,8 +96,8 @@ export class LiveIngestService {
         awayScore: true,
         kickoffAt: true,
         externalId: true,
-        homeTeam: { select: { shortName: true } },
-        awayTeam: { select: { shortName: true } },
+        homeTeam: { select: { shortName: true, espnAbbr: true } },
+        awayTeam: { select: { shortName: true, espnAbbr: true } },
         season: {
           select: { competition: { select: { espnLeagueSlug: true } } },
         },
@@ -136,8 +136,12 @@ export class LiveIngestService {
           const target = STATE_TO_STATUS[ev.state];
           if (RANK[target] > RANK[m.status]) data.status = target;
           if (ev.state === 'in' || ev.state === 'post') {
-            const home = ev.scores[m.homeTeam!.shortName];
-            const away = ev.scores[m.awayTeam!.shortName];
+            // Match scores by ESPN abbreviation (espnAbbr), NOT the display
+            // shortName — shortName may be localized (pt-BR). Fallback for safety.
+            const home =
+              ev.scores[m.homeTeam!.espnAbbr ?? m.homeTeam!.shortName];
+            const away =
+              ev.scores[m.awayTeam!.espnAbbr ?? m.awayTeam!.shortName];
             if (home !== undefined && home !== m.homeScore)
               data.homeScore = home;
             if (away !== undefined && away !== m.awayScore)
@@ -180,16 +184,17 @@ export class LiveIngestService {
     m: {
       externalId: string | null;
       kickoffAt: Date;
-      homeTeam: { shortName: string } | null;
-      awayTeam: { shortName: string } | null;
+      homeTeam: { shortName: string; espnAbbr: string | null } | null;
+      awayTeam: { shortName: string; espnAbbr: string | null } | null;
     },
   ): EspnEvent | undefined {
     if (m.externalId) {
       const byId = events.find((e) => e.id === m.externalId);
       if (byId) return byId;
     }
-    const home = m.homeTeam?.shortName;
-    const away = m.awayTeam?.shortName;
+    // Match by ESPN abbreviation (espnAbbr), not the localizable shortName.
+    const home = m.homeTeam?.espnAbbr ?? m.homeTeam?.shortName;
+    const away = m.awayTeam?.espnAbbr ?? m.awayTeam?.shortName;
     if (!home || !away) return undefined;
     const pairMatches = events.filter(
       (e) => e.abbrs.includes(home) && e.abbrs.includes(away),
