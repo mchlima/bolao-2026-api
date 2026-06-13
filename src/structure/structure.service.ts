@@ -46,6 +46,7 @@ export class StructureService {
                     awayScore: true,
                     groupId: true,
                     tieId: true,
+                    stadiumId: true,
                     homeSourceLabel: true,
                     awaySourceLabel: true,
                     homeTeam: { select: TEAM_SELECT },
