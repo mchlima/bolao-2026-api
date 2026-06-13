@@ -72,8 +72,19 @@ export class MatchesService {
     return match;
   }
 
-  create(dto: CreateMatchDto): Promise<MatchWithRelations> {
-    return this.prisma.match.create({ data: dto, include: MATCH_INCLUDE });
+  async create(dto: CreateMatchDto): Promise<MatchWithRelations> {
+    const data = { ...dto };
+    // Auto-assign the next fixture number within the season when not provided
+    // (e.g. matches created from the structure editor) — keeps numbering
+    // consistent with the seeded fixtures (1..N) instead of leaving it null.
+    if (data.matchNumber == null) {
+      const { _max } = await this.prisma.match.aggregate({
+        where: { seasonId: dto.seasonId },
+        _max: { matchNumber: true },
+      });
+      data.matchNumber = (_max.matchNumber ?? 0) + 1;
+    }
+    return this.prisma.match.create({ data, include: MATCH_INCLUDE });
   }
 
   async update(
