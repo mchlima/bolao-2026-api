@@ -4,6 +4,7 @@ import { MatchStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EspnEvent, EspnService } from './espn.service';
 import { EventsService } from '../events/events.service';
+import { SlotResolverService } from '../structure/slot-resolver.service';
 
 const STATE_TO_STATUS: Record<EspnEvent['state'], MatchStatus> = {
   pre: 'SCHEDULED',
@@ -41,6 +42,7 @@ export class LiveIngestService {
     private readonly prisma: PrismaService,
     private readonly espn: EspnService,
     private readonly events: EventsService,
+    private readonly resolver: SlotResolverService,
   ) {}
 
   @Cron(TICK_CRON)
@@ -88,7 +90,7 @@ export class LiveIngestService {
       },
       select: {
         id: true,
-        tournamentId: true,
+        seasonId: true,
         status: true,
         homeScore: true,
         awayScore: true,
@@ -96,41 +98,71 @@ export class LiveIngestService {
         externalId: true,
         homeTeam: { select: { shortName: true } },
         awayTeam: { select: { shortName: true } },
+        season: {
+          select: { competition: { select: { espnLeagueSlug: true } } },
+        },
       },
     });
     if (candidates.length === 0) return;
 
-    const events = await this.espn.fetchScoreboard();
-    if (events.length === 0) return;
-
+    // Group by ESPN league slug (from the Competition) so one fetch per league
+    // serves every match of that tournament in the window.
+    const bySlug = new Map<string, typeof candidates>();
     for (const m of candidates) {
-      const ev = this.findEvent(events, m);
-      if (!ev) continue;
+      const slug = m.season.competition.espnLeagueSlug ?? 'fifa.world';
+      (bySlug.get(slug) ?? bySlug.set(slug, []).get(slug)!).push(m);
+    }
 
-      const data: Prisma.MatchUpdateInput = {};
-      if (!m.externalId) data.externalId = ev.id;
+    // Seasons where a match transitioned to FINISHED this tick → resolve brackets.
+    const finishedSeasons = new Set<string>();
 
-      if (/POSTPONED|CANCEL|SUSPEND/i.test(ev.statusName)) {
-        // Decision: leave postponed/cancelled to the admin — just log it once.
-        this.logger.log(
-          `ESPN marks ${m.homeTeam!.shortName}x${m.awayTeam!.shortName} as ${ev.statusName} — left for admin`,
-        );
-      } else {
-        const target = STATE_TO_STATUS[ev.state];
-        if (RANK[target] > RANK[m.status]) data.status = target;
-        if (ev.state === 'in' || ev.state === 'post') {
-          const home = ev.scores[m.homeTeam!.shortName];
-          const away = ev.scores[m.awayTeam!.shortName];
-          if (home !== undefined && home !== m.homeScore) data.homeScore = home;
-          if (away !== undefined && away !== m.awayScore) data.awayScore = away;
+    for (const [slug, group] of bySlug) {
+      const events = await this.espn.fetchScoreboard(slug);
+      if (events.length === 0) continue;
+
+      for (const m of group) {
+        const ev = this.findEvent(events, m);
+        if (!ev) continue;
+
+        const data: Prisma.MatchUpdateInput = {};
+        if (!m.externalId) data.externalId = ev.id;
+
+        if (/POSTPONED|CANCEL|SUSPEND/i.test(ev.statusName)) {
+          // Decision: leave postponed/cancelled to the admin — just log it once.
+          this.logger.log(
+            `ESPN marks ${m.homeTeam!.shortName}x${m.awayTeam!.shortName} as ${ev.statusName} — left for admin`,
+          );
+        } else {
+          const target = STATE_TO_STATUS[ev.state];
+          if (RANK[target] > RANK[m.status]) data.status = target;
+          if (ev.state === 'in' || ev.state === 'post') {
+            const home = ev.scores[m.homeTeam!.shortName];
+            const away = ev.scores[m.awayTeam!.shortName];
+            if (home !== undefined && home !== m.homeScore)
+              data.homeScore = home;
+            if (away !== undefined && away !== m.awayScore)
+              data.awayScore = away;
+          }
+        }
+
+        if (Object.keys(data).length > 0) {
+          await this.prisma.match.update({ where: { id: m.id }, data });
+          this.events.emit(`match:${m.id}`, `tournament:${m.seasonId}`);
+          this.logger.log(
+            `auto-update ${m.homeTeam!.shortName}x${m.awayTeam!.shortName}: ${JSON.stringify(data)}`,
+          );
+          if (data.status === 'FINISHED') finishedSeasons.add(m.seasonId);
         }
       }
+    }
 
-      if (Object.keys(data).length > 0) {
-        await this.prisma.match.update({ where: { id: m.id }, data });
-        this.events.emit(`match:${m.id}`, `tournament:${m.tournamentId}`);
-        this.logger.log(
-          `auto-update ${m.homeTeam!.shortName}x${m.awayTeam!.shortName}: ${JSON.stringify(data)}`,
+    // A finished match may decide a group or feed a knockout slot — re-resolve.
+    for (const seasonId of finishedSeasons) {
+      try {
+        await this.resolver.resolveSeason(seasonId);
+      } catch (e) {
+        this.logger.warn(
+          `slot resolve failed for season ${seasonId}: ${(e as Error).message}`,
         );
       }
     }

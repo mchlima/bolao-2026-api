@@ -8,7 +8,9 @@ import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { TeamsModule } from './teams/teams.module';
 import { StadiumsModule } from './stadiums/stadiums.module';
-import { TournamentsModule } from './tournaments/tournaments.module';
+import { CompetitionsModule } from './competitions/competitions.module';
+import { SeasonsModule } from './seasons/seasons.module';
+import { StructureModule } from './structure/structure.module';
 import { MatchesModule } from './matches/matches.module';
 import { ScoringModule } from './scoring/scoring.module';
 import { PredictionsModule } from './predictions/predictions.module';
@@ -36,7 +38,9 @@ import { EventsModule } from './events/events.module';
     AuthModule,
     TeamsModule,
     StadiumsModule,
-    TournamentsModule,
+    CompetitionsModule,
+    SeasonsModule,
+    StructureModule,
     MatchesModule,
     PredictionsModule,
     RankingsModule,

@@ -7,13 +7,14 @@ import { Paginated, paginated } from '../common/pagination';
 import { CreateMatchDto } from './dto/create-match.dto';
 import { QueryMatchesDto } from './dto/query-matches.dto';
 import { UpdateMatchDto } from './dto/update-match.dto';
+import { SlotResolverService } from '../structure/slot-resolver.service';
 
 // Relations returned with every match (teams carry flag/logo data for the UI).
 const MATCH_INCLUDE = {
   homeTeam: true,
   awayTeam: true,
   stadium: true,
-  tournament: { select: { id: true, name: true, status: true } },
+  season: { select: { id: true, name: true, status: true } },
 } satisfies Prisma.MatchInclude;
 
 export type MatchWithRelations = Prisma.MatchGetPayload<{
@@ -26,14 +27,15 @@ export class MatchesService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly events: EventsService,
+    private readonly resolver: SlotResolverService,
   ) {}
 
   async findAll(
     query: QueryMatchesDto,
   ): Promise<Paginated<MatchWithRelations>> {
-    const { page, pageSize, tournamentId, status, groupName } = query;
+    const { page, pageSize, seasonId, status, groupName } = query;
     const where: Prisma.MatchWhereInput = {
-      ...(tournamentId && { tournamentId }),
+      ...(seasonId && { seasonId }),
       ...(status && { status }),
       ...(groupName && { groupName }),
     };
@@ -116,8 +118,23 @@ export class MatchesService {
     }
     this.events.emit(
       `match:${updated.id}`,
-      `tournament:${updated.tournamentId}`,
+      `tournament:${updated.seasonId}`,
     );
+
+    // A finished match (or a changed knockout score) may decide a group or feed a
+    // bracket slot — re-resolve the season's ties. Best-effort; never blocks the update.
+    const scoreTouched =
+      dto.homeScore !== undefined ||
+      dto.awayScore !== undefined ||
+      dto.homePenalties !== undefined ||
+      dto.awayPenalties !== undefined;
+    if (updated.status === 'FINISHED' || (updated.tieId && scoreTouched)) {
+      try {
+        await this.resolver.resolveSeason(updated.seasonId);
+      } catch {
+        // resolution is advisory; a failure must not fail the match update
+      }
+    }
     return updated;
   }
 

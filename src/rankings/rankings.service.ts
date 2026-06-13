@@ -58,14 +58,14 @@ export class RankingsService {
   ) {}
 
   async tournamentRanking(
-    tournamentId: string,
+    seasonId: string,
     currentUserId?: string,
     // When given, the ranking is scoped to these members (a pool/"bolão");
     // omit for the global ranking on the tournament page.
     memberUserIds?: string[],
   ): Promise<RankingResponse> {
-    const tournament = await this.prisma.tournament.findUnique({
-      where: { id: tournamentId },
+    const tournament = await this.prisma.season.findUnique({
+      where: { id: seasonId },
       select: { id: true },
     });
     if (!tournament) {
@@ -79,7 +79,7 @@ export class RankingsService {
     // null side counts as 0, so provisional live points reflect e.g. 1-0.
     const matches = await this.prisma.match.findMany({
       where: {
-        tournamentId,
+        seasonId,
         status: { in: ['LIVE', 'FINISHED'] },
       },
       select: { id: true, homeScore: true, awayScore: true },
@@ -93,7 +93,7 @@ export class RankingsService {
 
     const predictions = await this.prisma.prediction.findMany({
       where: {
-        match: { tournamentId },
+        match: { seasonId },
         ...(memberUserIds && { userId: { in: memberUserIds } }),
       },
       select: {

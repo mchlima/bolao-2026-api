@@ -15,7 +15,7 @@ const PREDICTION_INCLUDE = {
       homeTeam: true,
       awayTeam: true,
       stadium: true,
-      tournament: { select: { id: true, name: true } },
+      season: { select: { id: true, name: true } },
     },
   },
 } satisfies Prisma.PredictionInclude;
@@ -64,17 +64,17 @@ export class PredictionsService {
 
     this.events.emit(
       `match:${dto.matchId}`,
-      `tournament:${match.tournamentId}`,
+      `tournament:${match.seasonId}`,
     );
     return this.findOneForUser(userId, dto.matchId);
   }
 
   async findMine(
     userId: string,
-    tournamentId?: string,
+    seasonId?: string,
   ): Promise<PredictionView[]> {
     const predictions = await this.prisma.prediction.findMany({
-      where: { userId, ...(tournamentId && { match: { tournamentId } }) },
+      where: { userId, ...(seasonId && { match: { seasonId } }) },
       include: PREDICTION_INCLUDE,
       relationLoadStrategy: 'join',
       orderBy: { match: { kickoffAt: 'asc' } },

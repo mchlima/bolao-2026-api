@@ -15,7 +15,7 @@ import {
 export class RankingsController {
   constructor(private readonly rankings: RankingsService) {}
 
-  @Get('tournaments/:id/ranking')
+  @Get('seasons/:id/ranking')
   tournament(
     @Param('id') id: string,
     @CurrentUser() user?: SafeUser,

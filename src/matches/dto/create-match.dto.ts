@@ -12,7 +12,7 @@ import {
 
 export class CreateMatchDto {
   @IsString()
-  tournamentId!: string;
+  seasonId!: string;
 
   @IsOptional()
   @IsString()
@@ -68,4 +68,26 @@ export class CreateMatchDto {
   @IsInt()
   @Min(1)
   matchNumber?: number;
+
+  // Structure links (admin builds the bracket/groups).
+  @IsOptional()
+  @IsString()
+  stageId?: string;
+
+  @IsOptional()
+  @IsString()
+  groupId?: string;
+
+  @IsOptional()
+  @IsString()
+  roundId?: string;
+
+  @IsOptional()
+  @IsString()
+  tieId?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  leg?: number;
 }
