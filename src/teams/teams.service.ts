@@ -23,6 +23,7 @@ export class TeamsService {
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
           { shortName: { contains: search, mode: 'insensitive' } },
+          { espnAbbr: { contains: search, mode: 'insensitive' } },
           { country: { contains: search, mode: 'insensitive' } },
         ],
       }),
