@@ -84,6 +84,31 @@ describe('StandingsService.computeTable', () => {
     expect(rows.map((r) => r.position)).toEqual([1, 2, 3, 4, 5]);
   });
 
+  it('counts a LIVE match provisionally (ge.globo-style live table)', () => {
+    const t = ['A', 'B'].map(team);
+    const live = {
+      homeTeamId: 'A',
+      awayTeamId: 'B',
+      homeScore: 1,
+      awayScore: 0,
+      status: MatchStatus.LIVE,
+      kickoffAt: D,
+    };
+    const rows = service.computeTable(t, [live], 'GENERIC');
+    const a = rows.find((r) => r.team.id === 'A')!;
+    const b = rows.find((r) => r.team.id === 'B')!;
+    // A is provisionally winning → 3 pts, both teams played 1.
+    expect(a).toMatchObject({ played: 1, wins: 1, points: 3, goalDiff: 1 });
+    expect(b).toMatchObject({ played: 1, losses: 1, points: 0 });
+    expect(rows[0].team.id).toBe('A');
+    // Both teams are flagged live (drives the REC indicator).
+    expect(a.live).toBe(true);
+    expect(b.live).toBe(true);
+    // Form (last 5) ignores the unsettled LIVE match.
+    expect(a.form).toEqual([]);
+    expect(b.form).toEqual([]);
+  });
+
   it('FIFA head-to-head breaks a full 3-way overall tie', () => {
     // A,B,C: A beats both B and C; B beats C; all beat D by the same margin so
     // overall points/GD/GF are NOT equal here — instead test the H2H mini-table

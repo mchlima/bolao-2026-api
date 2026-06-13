@@ -102,7 +102,12 @@ export class StandingsService {
     const groups: GroupStandings[] = [];
     for (const group of stage.groups) {
       const matches = await this.prisma.match.findMany({
-        where: { groupId: group.id, status: MatchStatus.FINISHED },
+        // LIVE matches count provisionally — the table reacts to in-progress
+        // scores (ge.globo-style "classificação ao vivo").
+        where: {
+          groupId: group.id,
+          status: { in: [MatchStatus.FINISHED, MatchStatus.LIVE] },
+        },
         select: {
           homeTeamId: true,
           awayTeamId: true,
@@ -128,7 +133,8 @@ export class StandingsService {
     };
   }
 
-  /** Pure: build a sorted classification table from teams + their finished matches. */
+  /** Pure: build a sorted classification table from teams + their matches
+   * (FINISHED count fully; LIVE count provisionally with their current score). */
   computeTable(
     teams: StandingsTeam[],
     matches: ScoredMatch[],
@@ -137,10 +143,14 @@ export class StandingsService {
     const stats = new Map<string, Stat>();
     for (const t of teams) stats.set(t.id, emptyStat());
 
-    const finished = matches.filter(
-      (m) => m.status === MatchStatus.FINISHED && m.homeTeamId && m.awayTeamId,
+    // FINISHED + LIVE both count toward the table (LIVE provisionally).
+    const counted = matches.filter(
+      (m) =>
+        (m.status === MatchStatus.FINISHED || m.status === MatchStatus.LIVE) &&
+        m.homeTeamId &&
+        m.awayTeamId,
     );
-    for (const m of finished) {
+    for (const m of counted) {
       const home = stats.get(m.homeTeamId!);
       const away = stats.get(m.awayTeamId!);
       if (!home || !away) continue; // match involves a team outside this group
@@ -166,7 +176,18 @@ export class StandingsService {
       }
     }
 
+    // Form (last 5) reflects only settled results — an in-progress match is
+    // not yet a W/D/L.
+    const finished = counted.filter((m) => m.status === MatchStatus.FINISHED);
     const form = this.computeForm(teams, finished);
+
+    // Teams currently playing — drives the "ao vivo" indicator on their row.
+    const liveTeamIds = new Set<string>();
+    for (const m of counted) {
+      if (m.status !== MatchStatus.LIVE) continue;
+      if (m.homeTeamId) liveTeamIds.add(m.homeTeamId);
+      if (m.awayTeamId) liveTeamIds.add(m.awayTeamId);
+    }
     const rows = teams.map((team) => {
       const s = stats.get(team.id)!;
       const goalDiff = s.goalsFor - s.goalsAgainst;
@@ -187,10 +208,11 @@ export class StandingsService {
         points: s.points,
         pct,
         form: form.get(team.id) ?? [],
+        live: liveTeamIds.has(team.id),
       } satisfies StandingsRow;
     });
 
-    this.sort(rows, finished, preset);
+    this.sort(rows, counted, preset);
     rows.forEach((r, i) => (r.position = i + 1));
     return rows;
   }

@@ -6,6 +6,7 @@ import {
 import { Match, Prediction, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ScoreResult, ScoringService } from '../scoring/scoring.service';
+import { PhaseWeightService } from '../scoring/phase-weight.service';
 import { EventsService } from '../events/events.service';
 import { UpsertPredictionDto } from './dto/upsert-prediction.dto';
 
@@ -33,6 +34,7 @@ export class PredictionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly scoring: ScoringService,
+    private readonly phaseWeight: PhaseWeightService,
     private readonly events: EventsService,
   ) {}
 
@@ -79,7 +81,9 @@ export class PredictionsService {
       relationLoadStrategy: 'join',
       orderBy: { match: { kickoffAt: 'asc' } },
     });
-    return predictions.map((p) => this.withScore(p));
+    const seasonIds = [...new Set(predictions.map((p) => p.match.seasonId))];
+    const weightByRound = await this.phaseWeight.byRound(seasonIds);
+    return predictions.map((p) => this.withScore(p, weightByRound));
   }
 
   private async findOneForUser(
@@ -97,7 +101,10 @@ export class PredictionsService {
         message: 'Palpite não encontrado.',
       });
     }
-    return this.withScore(prediction);
+    const weightByRound = await this.phaseWeight.byRound(
+      prediction.match.seasonId,
+    );
+    return this.withScore(prediction, weightByRound);
   }
 
   /**
@@ -134,15 +141,21 @@ export class PredictionsService {
     }
   }
 
-  private withScore(prediction: PredictionWithMatch): PredictionView {
+  private withScore(
+    prediction: PredictionWithMatch,
+    weightByRound?: Map<string, number>,
+  ): PredictionView {
     const m = prediction.match;
     // Scores default to 0x0, so "has a result" is driven by status, not by a
     // null score: only LIVE (provisional) or FINISHED matches are scored.
     const scorable = m.status === 'LIVE' || m.status === 'FINISHED';
+    // Knockout matches scale by their phase weight (1 for group/league).
+    const weight = (m.roundId && weightByRound?.get(m.roundId)) || 1;
     const score = scorable
       ? this.scoring.score(
           { home: prediction.homeScore, away: prediction.awayScore },
           { home: m.homeScore, away: m.awayScore },
+          weight,
         )
       : null;
     return { ...prediction, score };

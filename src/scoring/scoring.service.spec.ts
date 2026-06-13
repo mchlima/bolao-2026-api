@@ -1,135 +1,118 @@
 import { ConfigService } from '@nestjs/config';
-import { ScoringService, ScoreTier } from './scoring.service';
+import { ScoringService } from './scoring.service';
 
-describe('ScoringService (Model B — proximity)', () => {
-  // ConfigService that returns no overrides → service uses defaults (4/3/1).
-  const service = new ScoringService({
-    get: () => undefined,
-  } as unknown as ConfigService);
+// Defaults (no env overrides): EXACT 25 / WINNER_GOALS 18 / GOAL_DIFF 15 /
+// LOSER_GOALS 12 / OUTCOME 10 / NONE 0.
+const noEnv = { get: () => undefined } as unknown as ConfigService;
+const service = new ScoringService(noEnv);
 
-  const cases: Array<{
-    name: string;
-    pred: [number, number];
-    result: [number, number];
-    tier: ScoreTier;
-    points: number;
-  }> = [
-    {
-      name: 'exact score',
-      pred: [2, 1],
-      result: [2, 1],
-      tier: 'EXACT',
-      points: 10,
-    },
-    {
-      name: 'exact draw',
-      pred: [0, 0],
-      result: [0, 0],
-      tier: 'EXACT',
-      points: 10,
-    },
-    {
-      name: 'one team exact + other near',
-      pred: [2, 0],
-      result: [2, 1],
-      tier: 'ONE_TEAM_SCORE',
-      points: 8,
-    },
-    {
-      name: 'one team exact + other far',
-      pred: [4, 3],
-      result: [4, 1],
-      tier: 'ONE_TEAM_SCORE',
-      points: 7,
-    },
-    {
-      name: 'close, both off by one',
-      pred: [3, 2],
-      result: [2, 1],
-      tier: 'CLOSE',
-      points: 6,
-    },
-    {
-      name: 'close draw',
-      pred: [1, 1],
-      result: [2, 2],
-      tier: 'CLOSE',
-      points: 6,
-    },
-    {
-      name: 'outcome only, one near',
-      pred: [5, 0],
-      result: [2, 1],
-      tier: 'OUTCOME',
-      points: 5,
-    },
-    {
-      name: 'outcome only, both far',
-      pred: [5, 3],
-      result: [2, 1],
-      tier: 'OUTCOME',
-      points: 4,
-    },
-    {
-      name: 'one team exact but wrong winner (consolation)',
-      pred: [2, 3],
-      result: [2, 1],
-      tier: 'TEAM_GOALS',
-      points: 1,
-    },
-    {
-      name: 'Fagner: 2x1 on a 0x1 — away goals exact, wrong winner',
-      pred: [2, 1],
-      result: [0, 1],
-      tier: 'TEAM_GOALS',
-      points: 1,
-    },
-    { name: 'nothing', pred: [0, 2], result: [2, 0], tier: 'NONE', points: 0 },
-  ];
+const sc = (h: number, a: number) => ({ home: h, away: a });
 
-  it.each(cases)(
-    '$name → $tier ($points)',
-    ({ pred, result, tier, points }) => {
-      const r = service.score(
-        { home: pred[0], away: pred[1] },
-        { home: result[0], away: result[1] },
+describe('ScoringService.score — granular market model', () => {
+  describe('home win 2-1', () => {
+    const result = sc(2, 1);
+    const cases: Array<[number, number, string, number]> = [
+      [2, 1, 'EXACT', 25],
+      [2, 0, 'WINNER_GOALS', 18], // winner's goals (2) exact
+      [3, 2, 'GOAL_DIFF', 15], // same goal difference (+1)
+      [3, 1, 'LOSER_GOALS', 12], // loser's goals (1) exact
+      [4, 2, 'OUTCOME', 10], // right winner, nothing else
+      [0, 2, 'NONE', 0], // wrong winner
+      [1, 1, 'NONE', 0], // predicted draw, was a home win
+    ];
+    it.each(cases)('%i-%i → %s (%i pts)', (h, a, tier, points) => {
+      expect(service.score(sc(h, a), result)).toEqual({ tier, points });
+    });
+  });
+
+  describe('away win 1-3', () => {
+    const result = sc(1, 3);
+    it('0-2 keeps the goal difference (-2) → GOAL_DIFF 15', () => {
+      expect(service.score(sc(0, 2), result)).toEqual({
+        tier: 'GOAL_DIFF',
+        points: 15,
+      });
+    });
+    it('1-4 nails the loser (home 1) goals → LOSER_GOALS 12', () => {
+      expect(service.score(sc(1, 4), result)).toEqual({
+        tier: 'LOSER_GOALS',
+        points: 12,
+      });
+    });
+    it('0-3 nails the winner (away 3) goals → WINNER_GOALS 18', () => {
+      expect(service.score(sc(0, 3), result)).toEqual({
+        tier: 'WINNER_GOALS',
+        points: 18,
+      });
+    });
+  });
+
+  describe('draw 2-2 (no winner/loser, so only EXACT or OUTCOME)', () => {
+    const result = sc(2, 2);
+    it('2-2 → EXACT 25', () =>
+      expect(service.score(sc(2, 2), result).tier).toBe('EXACT'));
+    it('1-1 → OUTCOME 10 (right draw, wrong score)', () =>
+      expect(service.score(sc(1, 1), result)).toEqual({
+        tier: 'OUTCOME',
+        points: 10,
+      }));
+    it('0-0 → OUTCOME 10', () =>
+      expect(service.score(sc(0, 0), result).points).toBe(10));
+    it('3-1 → NONE 0 (predicted a home win)', () =>
+      expect(service.score(sc(3, 1), result)).toEqual({
+        tier: 'NONE',
+        points: 0,
+      }));
+  });
+
+  describe('phase weight (knockout multiplier, progressive with cap)', () => {
+    it('default step 1, cap 3: group 1×, then 2×, 3×, capped at 3×', () => {
+      expect(service.phaseWeight(0)).toBe(1); // group
+      expect(service.phaseWeight(1)).toBe(2); // 16-avos
+      expect(service.phaseWeight(2)).toBe(3); // oitavas
+      expect(service.phaseWeight(3)).toBe(3); // quartas — capped
+      expect(service.phaseWeight(5)).toBe(3); // final — capped
+    });
+    it('weight multiplies the points, not the tier', () => {
+      expect(service.score(sc(2, 1), sc(2, 1), 3)).toEqual({
+        tier: 'EXACT',
+        points: 75,
+      });
+      expect(service.score(sc(4, 2), sc(2, 1), 2)).toEqual({
+        tier: 'OUTCOME',
+        points: 20,
+      });
+    });
+  });
+
+  describe('env overrides', () => {
+    const make = (env: Record<string, string>) =>
+      new ScoringService({
+        get: (k: string) => env[k],
+      } as unknown as ConfigService);
+
+    it('honors SCORING_* point values', () => {
+      expect(make({ SCORING_EXACT: '30' }).score(sc(2, 1), sc(2, 1)).points).toBe(
+        30,
       );
-      expect(r.tier).toBe(tier);
-      expect(r.points).toBe(points);
-    },
-  );
+    });
 
-  it('outcome is the gate — wrong winner with no exact team scores 0', () => {
-    expect(service.tierFor({ home: 0, away: 2 }, { home: 2, away: 0 })).toBe(
-      'NONE',
-    );
-  });
+    it('"dobrar fixo": step 1 + cap 2 → every knockout round is 2×', () => {
+      const s = make({ SCORING_PHASE_STEP: '1', SCORING_PHASE_CAP: '2' });
+      expect(s.phaseWeight(0)).toBe(1); // group
+      expect(s.phaseWeight(1)).toBe(2); // 16-avos
+      expect(s.phaseWeight(4)).toBe(2); // semis — still 2×
+    });
 
-  it('wrong winner but one exact team goal → consolation below base', () => {
-    const r = service.score({ home: 2, away: 3 }, { home: 2, away: 1 });
-    expect(r.tier).toBe('TEAM_GOALS');
-    expect(r.points).toBe(1);
-    // never beats getting the outcome right (which earns base = 4)
-    expect(r.points).toBeLessThan(4);
-  });
+    it('cap 0 = no cap (pure progression); step 2', () => {
+      const s = make({ SCORING_PHASE_STEP: '2', SCORING_PHASE_CAP: '0' });
+      expect(s.phaseWeight(1)).toBe(3); // 1 + 1*2
+      expect(s.phaseWeight(3)).toBe(7); // 1 + 3*2, uncapped
+    });
 
-  it('honors SCORING_TEAM_EXACT_MISS override', () => {
-    const custom = new ScoringService({
-      get: (k: string) =>
-        k === 'SCORING_TEAM_EXACT_MISS' ? '2' : undefined,
-    } as unknown as ConfigService);
-    expect(
-      custom.score({ home: 2, away: 3 }, { home: 2, away: 1 }).points,
-    ).toBe(2);
-  });
-
-  it('honors env overrides for the point components', () => {
-    const custom = new ScoringService({
-      get: (k: string) => (k === 'SCORING_BASE' ? '20' : undefined),
-    } as unknown as ConfigService);
-    // outcome-only (both teams far): BASE only.
-    expect(
-      custom.score({ home: 5, away: 3 }, { home: 2, away: 1 }).points,
-    ).toBe(20);
+    it('step 0 disables phase weighting', () => {
+      const s = make({ SCORING_PHASE_STEP: '0' });
+      expect(s.phaseWeight(5)).toBe(1);
+    });
   });
 });

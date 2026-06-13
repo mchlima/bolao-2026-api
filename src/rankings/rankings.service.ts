@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { PhaseWeightService } from '../scoring/phase-weight.service';
 import { ScoreTier, ScoringService } from '../scoring/scoring.service';
 
 export interface RankingEntry {
@@ -55,6 +56,7 @@ export class RankingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly scoring: ScoringService,
+    private readonly phaseWeight: PhaseWeightService,
   ) {}
 
   async tournamentRanking(
@@ -82,12 +84,17 @@ export class RankingsService {
         seasonId,
         status: { in: ['LIVE', 'FINISHED'] },
       },
-      select: { id: true, homeScore: true, awayScore: true },
+      select: { id: true, roundId: true, homeScore: true, awayScore: true },
     });
+    // Per-match phase weight: knockout rounds scale up, group matches stay at 1.
+    const weightByRound = await this.phaseWeight.byRound(seasonId);
     const resultByMatch = new Map(
       matches.map((m) => [
         m.id,
-        { home: m.homeScore ?? 0, away: m.awayScore ?? 0 },
+        {
+          result: { home: m.homeScore ?? 0, away: m.awayScore ?? 0 },
+          weight: (m.roundId && weightByRound.get(m.roundId)) || 1,
+        },
       ]),
     );
 
@@ -122,11 +129,12 @@ export class RankingsService {
       // Tiebreaker: the user's earliest prediction in the tournament.
       const ts = p.createdAt.getTime();
       if (a.predictedAt === undefined || ts < a.predictedAt) a.predictedAt = ts;
-      const result = resultByMatch.get(p.matchId);
-      if (result) {
+      const m = resultByMatch.get(p.matchId);
+      if (m) {
         const s = this.scoring.score(
           { home: p.homeScore, away: p.awayScore },
-          result,
+          m.result,
+          m.weight,
         );
         a.points += s.points;
         a.scored += 1;
@@ -147,6 +155,8 @@ export class RankingsService {
       where: { id: matchId },
       select: {
         id: true,
+        seasonId: true,
+        roundId: true,
         status: true,
         homeScore: true,
         awayScore: true,
@@ -166,6 +176,9 @@ export class RankingsService {
     const result = playing
       ? { home: match.homeScore ?? 0, away: match.awayScore ?? 0 }
       : null;
+    // Phase weight for this match (1 unless it's a knockout round).
+    const weightByRound = await this.phaseWeight.byRound(match.seasonId);
+    const weight = (match.roundId && weightByRound.get(match.roundId)) || 1;
 
     const predictions = await this.prisma.prediction.findMany({
       where: {
@@ -225,6 +238,7 @@ export class RankingsService {
         const s = this.scoring.score(
           { home: p.homeScore, away: p.awayScore },
           result,
+          weight,
         );
         a.points = s.points;
         a.scored = 1;

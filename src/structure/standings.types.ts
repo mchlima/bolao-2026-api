@@ -22,6 +22,7 @@ export interface StandingsRow {
   points: number; // P — pontos
   pct: number; // % — aproveitamento (points / (played*3) * 100, 1 decimal)
   form: ('W' | 'D' | 'L')[]; // last 5 results, oldest → newest
+  live: boolean; // true while this team has a match in progress (provisional row)
 }
 
 export interface GroupStandings {
