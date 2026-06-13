@@ -16,6 +16,8 @@ interface ScoredMatch {
   awayScore: number;
   status: MatchStatus;
   kickoffAt: Date;
+  // Round order (matchday), for the previous-round movement baseline.
+  round?: { order: number } | null;
   // Discipline (default 0 when absent) — drives the fair-play tiebreak + display.
   homeYellow?: number;
   homeRed?: number;
@@ -132,6 +134,7 @@ export class StandingsService {
           awayScore: true,
           status: true,
           kickoffAt: true,
+          round: { select: { order: true } },
           homeYellow: true,
           homeRed: true,
           awayYellow: true,
@@ -141,11 +144,9 @@ export class StandingsService {
         },
       });
       const teams: StandingsTeam[] = group.teams.map((gt) => gt.team);
-      groups.push({
-        groupId: group.id,
-        groupName: group.name,
-        rows: this.computeTable(teams, matches, stage.tiebreakPreset),
-      });
+      const rows = this.computeTable(teams, matches, stage.tiebreakPreset);
+      this.applyMovement(rows, teams, matches, stage.tiebreakPreset);
+      groups.push({ groupId: group.id, groupName: group.name, rows });
     }
 
     return {
@@ -226,6 +227,7 @@ export class StandingsService {
           : 0;
       return {
         position: 0,
+        previousPosition: null,
         team,
         played: s.played,
         wins: s.wins,
@@ -247,6 +249,36 @@ export class StandingsService {
     this.sort(rows, counted, preset);
     rows.forEach((r, i) => (r.position = i + 1));
     return rows;
+  }
+
+  /** Set each row's previousPosition = its rank in the table built from FINISHED
+   *  matches BEFORE the current (latest) round — so the UI shows up/down/= movement.
+   *  Null while there's no prior completed round (first round). */
+  private applyMovement(
+    rows: StandingsRow[],
+    teams: StandingsTeam[],
+    matches: ScoredMatch[],
+    preset: TiebreakPreset,
+  ): void {
+    const counted = matches.filter(
+      (m) =>
+        (m.status === MatchStatus.FINISHED || m.status === MatchStatus.LIVE) &&
+        m.homeTeamId &&
+        m.awayTeamId,
+    );
+    const currentRound = counted.reduce((mx, m) => Math.max(mx, m.round?.order ?? 0), 0);
+    if (currentRound <= 1) return; // nothing to compare against yet
+    const previousMatches = matches.filter(
+      (m) =>
+        m.status === MatchStatus.FINISHED &&
+        m.homeTeamId &&
+        m.awayTeamId &&
+        (m.round?.order ?? 0) < currentRound,
+    );
+    if (!previousMatches.length) return;
+    const prev = this.computeTable(teams, previousMatches, preset);
+    const prevPos = new Map(prev.map((r) => [r.team.id, r.position]));
+    for (const r of rows) r.previousPosition = prevPos.get(r.team.id) ?? null;
   }
 
   /** Sort rows in place: points desc, then preset criteria within each points-block, then name. */

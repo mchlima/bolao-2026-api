@@ -11,6 +11,9 @@ export interface StandingsTeam {
 
 export interface StandingsRow {
   position: number;
+  // Position after the previous round (matchday); null when there's no prior
+  // completed round to compare against. Drives the up/down/= movement indicator.
+  previousPosition: number | null;
   team: StandingsTeam;
   played: number; // J — jogos
   wins: number; // V — vitórias
