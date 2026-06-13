@@ -11,31 +11,36 @@ export interface EspnEvent {
   abbrs: string[];
 }
 
-const SCOREBOARD_URL =
-  'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard';
+const DEFAULT_LEAGUE_SLUG = 'fifa.world';
+const scoreboardUrl = (slug: string): string =>
+  `https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/scoreboard`;
 
 /**
- * Reads the FIFA World Cup scoreboard from ESPN's public (unofficial) site API.
- * No key required. Returns [] on any failure — the caller must degrade gracefully
- * (manual control still works). Easy to swap for a keyed provider later.
+ * Reads a league's scoreboard from ESPN's public (unofficial) site API. The
+ * league slug (e.g. "fifa.world", "bra.1", "conmebol.libertadores") comes from
+ * the Competition, so one engine serves every tournament. No key required.
+ * Returns [] on any failure — the caller must degrade gracefully (manual control
+ * still works). Easy to swap for a keyed provider later.
  */
 @Injectable()
 export class EspnService {
   private readonly logger = new Logger(EspnService.name);
 
-  async fetchScoreboard(): Promise<EspnEvent[]> {
+  async fetchScoreboard(
+    slug: string = DEFAULT_LEAGUE_SLUG,
+  ): Promise<EspnEvent[]> {
     let res: Response;
     try {
-      res = await fetch(SCOREBOARD_URL, {
+      res = await fetch(scoreboardUrl(slug), {
         headers: { accept: 'application/json' },
         signal: AbortSignal.timeout(8000),
       });
     } catch (e) {
-      this.logger.warn(`ESPN fetch failed: ${(e as Error).message}`);
+      this.logger.warn(`ESPN fetch failed (${slug}): ${(e as Error).message}`);
       return [];
     }
     if (!res.ok) {
-      this.logger.warn(`ESPN responded ${res.status}`);
+      this.logger.warn(`ESPN responded ${res.status} for ${slug}`);
       return [];
     }
     const data = (await res.json()) as EspnScoreboard;

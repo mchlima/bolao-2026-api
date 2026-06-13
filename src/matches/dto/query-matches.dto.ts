@@ -5,7 +5,7 @@ import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 export class QueryMatchesDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
-  tournamentId?: string;
+  seasonId?: string;
 
   @IsOptional()
   @IsEnum(MatchStatus)

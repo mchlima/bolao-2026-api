@@ -23,11 +23,44 @@ enum UserRole {
   ADMIN
 }
 
-enum TournamentStatus {
+// A Season is one edition of a Competition; status drives its lifecycle.
+enum SeasonStatus {
   DRAFT
   UPCOMING
   ONGOING
   FINISHED
+}
+
+// Nature of a competition (football-data.org convention).
+enum CompetitionType {
+  LEAGUE // pure round-robin (Brasileirão, Premier League)
+  CUP // pure knockout (Copa do Brasil, FA Cup)
+  LEAGUE_CUP // groups then knockout (World Cup, Champions League, Libertadores)
+}
+
+// Overall format of one Season (an edition can change format year to year).
+enum SeasonFormat {
+  LEAGUE
+  GROUPS
+  KNOCKOUT
+  GROUPS_KNOCKOUT
+}
+
+// Format of a single Stage (a Season has 1..N ordered stages).
+enum StageFormat {
+  LEAGUE // single round-robin table (pontos corridos)
+  GROUP // multiple group tables
+  KNOCKOUT // bracket of ties
+}
+
+// Tiebreak ruleset for a Stage's standings (ordered criteria live in the service).
+// GENERIC = points → goal diff → goals for. Override with Stage.tiebreakOverride (Json[]).
+enum TiebreakPreset {
+  BRASILEIRAO // wins → goal diff → goals for → head-to-head → red/yellow cards
+  FIFA // head-to-head (pts/gd/gf among tied) → overall gd → overall gf → fair play → draw
+  UEFA // head-to-head pts → h2h gd → h2h gf → overall gd → overall gf → wins
+  CONMEBOL // overall gd → goals for → away goals → fair play → draw
+  GENERIC // points → goal diff → goals for
 }
 
 enum TeamType {
@@ -42,13 +75,47 @@ enum MatchStatus {
   CANCELLED
 }
 
+// How a leg/match was decided — drives display ("após prorrogação", "nos pênaltis").
+enum MatchDuration {
+  REGULAR
+  EXTRA_TIME
+  PENALTY_SHOOTOUT
+}
+
+// Result orientation of a finished match (knockout needs an explicit winner).
+enum MatchWinner {
+  HOME
+  AWAY
+  DRAW
+}
+
+// How a two-legged/knockout Tie was resolved (for display + advancement).
+enum TieResolution {
+  AGGREGATE // decided on aggregate score
+  AWAY_GOALS // decided on away-goals rule (rare/legacy; not used in CONMEBOL/Copa do Brasil)
+  EXTRA_TIME // decided in extra time
+  PENALTIES // decided in a shootout
+}
+
+// Discriminator for a knockout Tie's TBD slot source (full ref lives in Tie.homeSource/awaySource Json).
+//   GROUP_POSITION → { type, groupId, position }       e.g. "1º Grupo A"
+//   BEST_RANKED    → { type, stageId, position, eligibleGroups? }  e.g. "Melhor 3º" (World Cup 2026)
+//   MATCH_WINNER   → { type, tieId }                    e.g. "Vencedor Jogo 73"
+//   MATCH_LOSER    → { type, tieId }                    feeds the third-place match
+enum SlotSourceType {
+  GROUP_POSITION
+  BEST_RANKED
+  MATCH_WINNER
+  MATCH_LOSER
+}
+
 enum AuditActorType {
   USER
   SYSTEM
 }
 
 // "Bolão" (pt-BR UI) = Pool (code/data). A Pool is a private group competing on
-// one tournament's predictions; it never holds predictions of its own (those are
+// one season's predictions; it never holds predictions of its own (those are
 // global per user) — it only scopes which members enter the rankings.
 enum PoolVisibility {
   PRIVATE // joinable only via an invite link (MVP default)
@@ -84,20 +151,165 @@ model User {
   @@map("users")
 }
 
-model Tournament {
-  id        String           @id @default(cuid())
-  name      String
-  logoUrl   String?
-  startDate DateTime?
-  endDate   DateTime?
-  status    TournamentStatus @default(DRAFT)
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
+// A Competition is the timeless tournament (e.g. "Copa do Mundo FIFA",
+// "Brasileirão Série A"). It groups N Season editions and holds the stable
+// external keys — notably espnLeagueSlug, which lets the live robot poll any
+// league via .../soccer/<slug>/scoreboard (one engine, many tournaments).
+model Competition {
+  id             String          @id @default(cuid())
+  name           String
+  slug           String          @unique // internal stable key, e.g. "fifa.world", "bra.1"
+  type           CompetitionType
+  country        String? // null for international/continental competitions
+  confederation  String? // "FIFA", "UEFA", "CONMEBOL", "CBF"...
+  logoUrl        String?
+  espnLeagueSlug String? // ESPN league slug for the live robot (e.g. "fifa.world", "conmebol.libertadores")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
+  seasons Season[]
+
+  @@map("competitions")
+}
+
+// A Season is one edition of a Competition ("Copa do Mundo FIFA 2026"). It owns
+// the structure (Stages → Groups/Rounds → Ties → Matches) and is what a Pool
+// ("bolão") binds to. Renamed from the former flat "Tournament" model.
+model Season {
+  id            String       @id @default(cuid())
+  competitionId String
+  name          String // full display name, e.g. "Copa do Mundo FIFA 2026"
+  seasonLabel   String? // edition label, e.g. "2026", "2025/26"
+  logoUrl       String?
+  startDate     DateTime?
+  endDate       DateTime?
+  status        SeasonStatus @default(DRAFT)
+  format        SeasonFormat @default(KNOCKOUT)
+  winnerTeamId  String? // champion, set when FINISHED
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  competition Competition @relation(fields: [competitionId], references: [id])
+  winnerTeam  Team?       @relation("SeasonWinner", fields: [winnerTeamId], references: [id])
+  stages      Stage[]
+  matches     Match[]
+  pools       Pool[]
+
+  @@index([competitionId])
+  @@map("seasons")
+}
+
+// A Stage is a format-phase of a Season ("Fase de Grupos", "Mata-mata",
+// "Pontos Corridos"). Its format decides whether it produces standings tables
+// (LEAGUE/GROUP) or a bracket (KNOCKOUT).
+model Stage {
+  id               String         @id @default(cuid())
+  seasonId         String
+  name             String
+  format           StageFormat
+  order            Int // display/processing order within the season
+  tiebreakPreset   TiebreakPreset @default(GENERIC)
+  tiebreakOverride Json? // optional ordered criteria array overriding the preset
+  hasThirdPlace    Boolean        @default(false)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  season  Season  @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  groups  Group[]
+  rounds  Round[]
   matches Match[]
-  pools   Pool[]
 
-  @@map("tournaments")
+  @@index([seasonId])
+  @@map("stages")
+}
+
+// A Group within a LEAGUE/GROUP stage. A LEAGUE stage has exactly one Group
+// (the league table); a GROUP stage has many ("A".."L"). Standings are derived.
+model Group {
+  id        String   @id @default(cuid())
+  stageId   String
+  name      String // "A".."L", or the league name for single-table stages
+  order     Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stage   Stage       @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  teams   GroupTeam[]
+  matches Match[]
+
+  @@index([stageId])
+  @@map("groups")
+}
+
+// Membership of a Team in a Group (join). Standings are computed from matches;
+// this also pins teams that haven't played yet so empty tables still render.
+model GroupTeam {
+  id      String @id @default(cuid())
+  groupId String
+  teamId  String
+  seed    Int? // optional draw seeding/pot
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  team  Team  @relation(fields: [teamId], references: [id])
+
+  @@unique([groupId, teamId])
+  @@index([teamId])
+  @@map("group_teams")
+}
+
+// A Round is a slice within a Stage: a numbered matchday (rodada 1..38) in a
+// league/group, or a named knockout round ("Oitavas de final"). Round membership
+// is an attribute of the match — a postponed match keeps its round, only the date moves.
+model Round {
+  id        String   @id @default(cuid())
+  stageId   String
+  number    Int? // matchday number for league/group rounds
+  name      String? // knockout round name ("Oitavas de final")
+  legs      Int      @default(1) // 1 = single match, 2 = ida/volta
+  order     Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stage   Stage   @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  ties    Tie[]
+  matches Match[]
+
+  @@index([stageId])
+  @@map("rounds")
+}
+
+// A Tie is a knockout confrontation — the bracket node above its 1 (single) or
+// 2 (ida/volta) leg Matches. It holds the resolved matchup, the TBD slot feeders,
+// and the aggregate outcome. Single-leg rounds still use a Tie (legs=1) so the
+// bracket is uniform.
+model Tie {
+  id              String         @id @default(cuid())
+  roundId         String
+  order           Int // position within the round (top→bottom of the bracket)
+  // Resolved participants — null until the feeders resolve.
+  homeTeamId      String?
+  awayTeamId      String?
+  // TBD slot feeders (see SlotSourceType). Display fallback in *SourceLabel.
+  homeSource      Json?
+  awaySource      Json?
+  homeSourceLabel String? // e.g. "2º Grupo A", "Vencedor Jogo 73", "Melhor 3º"
+  awaySourceLabel String?
+  // Aggregate outcome (computed by SlotResolverService from the legs).
+  aggregateHome   Int?
+  aggregateAway   Int?
+  winnerTeamId    String?
+  resolution      TieResolution?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  round      Round   @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  homeTeam   Team?   @relation("TieHome", fields: [homeTeamId], references: [id])
+  awayTeam   Team?   @relation("TieAway", fields: [awayTeamId], references: [id])
+  winnerTeam Team?   @relation("TieWinner", fields: [winnerTeamId], references: [id])
+  matches    Match[]
+
+  @@index([roundId])
+  @@map("ties")
 }
 
 model Team {
@@ -121,8 +333,13 @@ model Team {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  homeMatches Match[] @relation("HomeTeam")
-  awayMatches Match[] @relation("AwayTeam")
+  homeMatches Match[]     @relation("HomeTeam")
+  awayMatches Match[]     @relation("AwayTeam")
+  groupTeams  GroupTeam[]
+  homeTies    Tie[]       @relation("TieHome")
+  awayTies    Tie[]       @relation("TieAway")
+  wonTies     Tie[]       @relation("TieWinner")
+  wonSeasons  Season[]    @relation("SeasonWinner")
 
   @@map("teams")
 }
@@ -143,8 +360,14 @@ model Stadium {
 }
 
 model Match {
-  id              String      @id @default(cuid())
-  tournamentId    String
+  id              String         @id @default(cuid())
+  seasonId        String
+  // Structure links (all nullable — a match always has a season, structure is filled in by admin/seed).
+  stageId         String?
+  groupId         String? // set for LEAGUE/GROUP matches
+  roundId         String? // the matchday or knockout round
+  tieId           String? // set for KNOCKOUT matches (the bracket node)
+  leg             Int? // 1 = ida, 2 = volta (within a two-legged Tie)
   // Teams are nullable: knockout slots are "to be determined" until the bracket resolves.
   homeTeamId      String?
   awayTeamId      String?
@@ -153,31 +376,44 @@ model Match {
   awaySourceLabel String?
   stadiumId       String?
   kickoffAt       DateTime
-  status          MatchStatus @default(SCHEDULED)
-  homeScore       Int         @default(0) // matches default to 0x0; never null
-  awayScore       Int         @default(0)
-  phaseLabel      String? // free text stage: "Fase de Grupos", "Oitavas de final"...
-  groupName       String? // "A".."L" for the group stage
-  matchNumber     Int? // official fixture number within the tournament (1..N)
+  status          MatchStatus    @default(SCHEDULED)
+  homeScore       Int            @default(0) // matches default to 0x0; never null
+  awayScore       Int            @default(0)
+  // Knockout-only result detail (null for league/group games).
+  homePenalties   Int? // shootout score
+  awayPenalties   Int?
+  winner          MatchWinner? // explicit result orientation when FINISHED
+  duration        MatchDuration? // REGULAR / EXTRA_TIME / PENALTY_SHOOTOUT
+  // Free-text fallbacks kept for back-compat/display; structure now lives in the FKs above.
+  phaseLabel      String? // e.g. "Fase de Grupos", "Oitavas de final"
+  groupName       String? // "A".."L" for the group stage (mirrors Group.name)
+  matchNumber     Int? // official fixture number within the season (1..N)
   // Manual override for the prediction window. NULL = follow the automatic rule
   // (open while SCHEDULED and before kickoff); true/false force open/closed.
   predictionsOpen Boolean?
   // Auto score/lifecycle (ESPN robot). externalId links to the provider fixture;
   // autoManaged false means the admin took over and the robot must skip it.
   externalId      String?
-  autoManaged     Boolean     @default(true)
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  autoManaged     Boolean        @default(true)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 
-  tournament  Tournament   @relation(fields: [tournamentId], references: [id])
+  season      Season       @relation(fields: [seasonId], references: [id])
+  stage       Stage?       @relation(fields: [stageId], references: [id])
+  group       Group?       @relation(fields: [groupId], references: [id])
+  round       Round?       @relation(fields: [roundId], references: [id])
+  tie         Tie?         @relation(fields: [tieId], references: [id])
   homeTeam    Team?        @relation("HomeTeam", fields: [homeTeamId], references: [id])
   awayTeam    Team?        @relation("AwayTeam", fields: [awayTeamId], references: [id])
   stadium     Stadium?     @relation(fields: [stadiumId], references: [id])
   predictions Prediction[]
 
-  @@unique([tournamentId, matchNumber]) // idempotent fixture seeding
-  @@index([tournamentId])
+  @@unique([seasonId, matchNumber]) // idempotent fixture seeding
+  @@index([seasonId])
   @@index([status])
+  @@index([groupId])
+  @@index([roundId])
+  @@index([tieId])
   @@map("matches")
 }
 
@@ -215,26 +451,26 @@ model AuditLog {
   @@map("audit_logs")
 }
 
-// A pool ("bolão") = one tournament from the global catalog + a group of members.
+// A pool ("bolão") = one Season from the global catalog + a group of members.
 // Predictions stay global (Prediction is unchanged); the pool only scopes rankings
-// to its members. Created over an existing tournament — users never create tournaments.
+// to its members. Created over an existing season — users never create seasons.
 model Pool {
   id                String         @id @default(cuid())
   name              String
   description       String? // internal — shown to members inside the pool
   inviteDescription String? // shown on the invite-accept page (public via link)
-  tournamentId      String
+  seasonId          String
   ownerId           String
   visibility        PoolVisibility @default(PRIVATE)
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
-  tournament Tournament   @relation(fields: [tournamentId], references: [id])
-  owner      User         @relation("PoolOwner", fields: [ownerId], references: [id])
-  members    PoolMember[]
-  invites    PoolInvite[]
+  season  Season       @relation(fields: [seasonId], references: [id])
+  owner   User         @relation("PoolOwner", fields: [ownerId], references: [id])
+  members PoolMember[]
+  invites PoolInvite[]
 
-  @@index([tournamentId])
+  @@index([seasonId])
   @@index([ownerId])
   @@map("pools")
 }

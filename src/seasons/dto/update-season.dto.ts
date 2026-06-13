@@ -1,4 +1,4 @@
-import { TournamentStatus } from '@prisma/client';
+import { SeasonFormat, SeasonStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   IsDate,
@@ -9,11 +9,22 @@ import {
   MinLength,
 } from 'class-validator';
 
-export class CreateTournamentDto {
+export class UpdateSeasonDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  competitionId?: string;
+
+  @IsOptional()
   @IsString()
   @MinLength(1)
   @MaxLength(120)
-  name!: string;
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  seasonLabel?: string;
 
   @IsOptional()
   @IsString()
@@ -31,6 +42,10 @@ export class CreateTournamentDto {
   endDate?: Date;
 
   @IsOptional()
-  @IsEnum(TournamentStatus)
-  status?: TournamentStatus;
+  @IsEnum(SeasonStatus)
+  status?: SeasonStatus;
+
+  @IsOptional()
+  @IsEnum(SeasonFormat)
+  format?: SeasonFormat;
 }

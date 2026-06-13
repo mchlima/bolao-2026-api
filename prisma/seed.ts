@@ -6,6 +6,7 @@ import {
   WC2026_MATCHES,
   WC2026_TOURNAMENT,
 } from './data/wc2026-matches';
+import { seedWc2026Structure } from './seed-wc-structure';
 
 const prisma = new PrismaClient();
 
@@ -52,19 +53,36 @@ async function seedStadiums(): Promise<void> {
 }
 
 async function seedWorldCup(): Promise<void> {
-  // Tournament (idempotent by name — Tournament.name is not unique in the schema).
+  // Competition (timeless parent; idempotent by slug). Holds the ESPN league slug
+  // that the live robot uses to poll scores for this and future editions.
+  const competition = await prisma.competition.upsert({
+    where: { slug: 'fifa.world' },
+    update: {},
+    create: {
+      name: 'Copa do Mundo FIFA',
+      slug: 'fifa.world',
+      type: 'LEAGUE_CUP',
+      confederation: 'FIFA',
+      espnLeagueSlug: 'fifa.world',
+    },
+  });
+
+  // Season = one edition (idempotent by name — Season.name is not unique).
   const data = {
+    competitionId: competition.id,
     name: WC2026_TOURNAMENT.name,
+    seasonLabel: '2026',
+    format: 'GROUPS_KNOCKOUT' as const,
     startDate: new Date(WC2026_TOURNAMENT.startDate),
     endDate: new Date(WC2026_TOURNAMENT.endDate),
     status: WC2026_TOURNAMENT.status,
   };
-  const existing = await prisma.tournament.findFirst({
+  const existing = await prisma.season.findFirst({
     where: { name: data.name },
   });
   const tournament = existing
-    ? await prisma.tournament.update({ where: { id: existing.id }, data })
-    : await prisma.tournament.create({ data });
+    ? await prisma.season.update({ where: { id: existing.id }, data })
+    : await prisma.season.create({ data });
 
   // Lookups: countryCode → team id, stadium name → id.
   const teams = await prisma.team.findMany({
@@ -102,7 +120,7 @@ async function seedWorldCup(): Promise<void> {
     const kickoffAt = new Date(`${m.date}T${m.time}:00${offset}`);
 
     const matchData = {
-      tournamentId: tournament.id,
+      seasonId: tournament.id,
       matchNumber: m.matchNumber,
       kickoffAt,
       stadiumId,
@@ -116,8 +134,8 @@ async function seedWorldCup(): Promise<void> {
 
     await prisma.match.upsert({
       where: {
-        tournamentId_matchNumber: {
-          tournamentId: tournament.id,
+        seasonId_matchNumber: {
+          seasonId: tournament.id,
           matchNumber: m.matchNumber,
         },
       },
@@ -126,8 +144,11 @@ async function seedWorldCup(): Promise<void> {
     });
   }
   console.log(
-    `✓ tournament "${tournament.name}" + ${WC2026_MATCHES.length} matches`,
+    `✓ season "${tournament.name}" + ${WC2026_MATCHES.length} matches`,
   );
+
+  // Build the formal structure (stages/groups/rounds/ties) from the seeded matches.
+  await seedWc2026Structure(prisma, tournament.id);
 }
 
 async function main(): Promise<void> {

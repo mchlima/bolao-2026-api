@@ -28,7 +28,7 @@ export class DashboardService {
       this.prisma.user.count(),
       this.prisma.user.count({ where: { isActive: true } }),
       this.prisma.user.count({ where: { role: 'ADMIN' } }),
-      this.prisma.tournament.count(),
+      this.prisma.season.count(),
       this.prisma.team.count(),
       this.prisma.stadium.count(),
       this.prisma.match.count(),

@@ -30,7 +30,7 @@ const TOURNAMENT_SELECT = {
   name: true,
   logoUrl: true,
   status: true,
-} satisfies Prisma.TournamentSelect;
+} satisfies Prisma.SeasonSelect;
 
 @Injectable()
 export class PoolsService {
@@ -42,8 +42,8 @@ export class PoolsService {
   // ─────────────────────────────────────────────── Pool lifecycle
 
   async create(userId: string, dto: CreatePoolDto): Promise<PoolDetail> {
-    const tournament = await this.prisma.tournament.findUnique({
-      where: { id: dto.tournamentId },
+    const tournament = await this.prisma.season.findUnique({
+      where: { id: dto.seasonId },
       select: { id: true },
     });
     if (!tournament) {
@@ -58,7 +58,7 @@ export class PoolsService {
         name: dto.name,
         description: dto.description ?? null,
         inviteDescription: dto.inviteDescription ?? null,
-        tournamentId: dto.tournamentId,
+        seasonId: dto.seasonId,
         ownerId: userId,
         visibility: dto.visibility ?? 'PRIVATE',
         members: { create: { userId, role: 'OWNER' } },
@@ -75,7 +75,7 @@ export class PoolsService {
       include: {
         pool: {
           include: {
-            tournament: { select: TOURNAMENT_SELECT },
+            season: { select: TOURNAMENT_SELECT },
             _count: { select: { members: true } },
           },
         },
@@ -89,7 +89,7 @@ export class PoolsService {
       description: m.pool.description,
       inviteDescription: m.pool.inviteDescription,
       visibility: m.pool.visibility,
-      tournament: m.pool.tournament,
+      tournament: m.pool.season,
       myRole: m.role,
       memberCount: m.pool._count.members,
       createdAt: m.pool.createdAt,
@@ -102,7 +102,7 @@ export class PoolsService {
     const pool = await this.prisma.pool.findUnique({
       where: { id: poolId },
       include: {
-        tournament: { select: TOURNAMENT_SELECT },
+        season: { select: TOURNAMENT_SELECT },
         members: {
           include: { user: { select: { id: true, name: true } } },
           orderBy: [{ role: 'asc' }, { joinedAt: 'asc' }],
@@ -131,7 +131,7 @@ export class PoolsService {
       description: pool.description,
       inviteDescription: pool.inviteDescription,
       visibility: pool.visibility,
-      tournament: pool.tournament,
+      tournament: pool.season,
       myRole: membership.role,
       memberCount: pool._count.members,
       createdAt: pool.createdAt,
@@ -300,7 +300,7 @@ export class PoolsService {
       include: {
         pool: {
           include: {
-            tournament: { select: TOURNAMENT_SELECT },
+            season: { select: TOURNAMENT_SELECT },
             _count: { select: { members: true } },
           },
         },
@@ -322,7 +322,7 @@ export class PoolsService {
       // The invite page shows the invite-facing text, not the internal one.
       description: invite.pool.inviteDescription,
       visibility: invite.pool.visibility,
-      tournament: invite.pool.tournament,
+      tournament: invite.pool.season,
       memberCount: invite.pool._count.members,
       alreadyMember: !!already,
     };
@@ -440,7 +440,7 @@ export class PoolsService {
     await this.requireMembership(poolId, userId);
     const pool = await this.prisma.pool.findUnique({
       where: { id: poolId },
-      select: { tournamentId: true },
+      select: { seasonId: true },
     });
     if (!pool) {
       throw new NotFoundException({
@@ -449,7 +449,7 @@ export class PoolsService {
       });
     }
     const memberIds = await this.memberUserIds(poolId);
-    return this.rankings.tournamentRanking(pool.tournamentId, userId, memberIds);
+    return this.rankings.tournamentRanking(pool.seasonId, userId, memberIds);
   }
 
   async matchRanking(

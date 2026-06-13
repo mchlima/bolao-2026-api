@@ -23,8 +23,8 @@ export class PredictionsController {
   @Get('me')
   mine(
     @CurrentUser() user: SafeUser,
-    @Query('tournamentId') tournamentId?: string,
+    @Query('seasonId') seasonId?: string,
   ): Promise<PredictionView[]> {
-    return this.predictions.findMine(user.id, tournamentId);
+    return this.predictions.findMine(user.id, seasonId);
   }
 }

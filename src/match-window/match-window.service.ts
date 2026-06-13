@@ -65,10 +65,10 @@ export class MatchWindowService {
         awayTeamId: { not: null },
         kickoffAt: { gt: since, lte: now },
       },
-      select: { id: true, tournamentId: true },
+      select: { id: true, seasonId: true },
     });
     for (const m of closed) {
-      this.events.emit(`match:${m.id}`, `tournament:${m.tournamentId}`);
+      this.events.emit(`match:${m.id}`, `tournament:${m.seasonId}`);
     }
     if (closed.length > 0) {
       this.logger.log(
@@ -82,10 +82,10 @@ export class MatchWindowService {
   private async emitExternalUpdates(): Promise<void> {
     const updated = await this.prisma.match.findMany({
       where: { updatedAt: { gt: this.lastSeenUpdate } },
-      select: { id: true, tournamentId: true, updatedAt: true },
+      select: { id: true, seasonId: true, updatedAt: true },
     });
     for (const m of updated) {
-      this.events.emit(`match:${m.id}`, `tournament:${m.tournamentId}`);
+      this.events.emit(`match:${m.id}`, `tournament:${m.seasonId}`);
       if (m.updatedAt > this.lastSeenUpdate) this.lastSeenUpdate = m.updatedAt;
     }
   }

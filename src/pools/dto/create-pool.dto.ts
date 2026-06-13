@@ -20,7 +20,7 @@ export class CreatePoolDto {
   inviteDescription?: string;
 
   @IsString()
-  tournamentId!: string;
+  seasonId!: string;
 
   // MVP only uses PRIVATE; accepted for forward-compatibility.
   @IsOptional()
