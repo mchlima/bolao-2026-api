@@ -122,4 +122,26 @@ describe('StandingsService.computeTable', () => {
     const rows = service.computeTable(t, ms, 'FIFA');
     expect(rows[0].team.id).toBe('A');
   });
+
+  it('fair play breaks a tie level on points/GD/GF (fewer cards ranks higher)', () => {
+    // A and B each beat a distinct opponent 1-0 → level on points(3)/GD(+1)/GF(1).
+    // B picked up a red (fairPlay -4); A clean (0). A must rank ahead of B.
+    const t = ['A', 'B', 'C', 'D'].map(team);
+    const card = (
+      home: string,
+      away: string,
+      hs: number,
+      as: number,
+      hfp: number,
+      afp: number,
+    ) => ({ ...m(home, away, hs, as), homeFairPlay: hfp, awayFairPlay: afp });
+    const ms = [card('A', 'C', 1, 0, 0, 0), card('B', 'D', 1, 0, -4, 0)];
+    const rows = service.computeTable(t, ms, 'FIFA');
+    const a = rows.find((r) => r.team.id === 'A')!;
+    const b = rows.find((r) => r.team.id === 'B')!;
+    expect(a.points).toBe(b.points);
+    expect(a.goalDiff).toBe(b.goalDiff);
+    expect(b.fairPlay).toBe(-4);
+    expect(a.position).toBeLessThan(b.position); // A ahead of B on fair play
+  });
 });

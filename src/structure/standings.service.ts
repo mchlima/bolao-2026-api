@@ -16,6 +16,13 @@ interface ScoredMatch {
   awayScore: number;
   status: MatchStatus;
   kickoffAt: Date;
+  // Discipline (default 0 when absent) — drives the fair-play tiebreak + display.
+  homeYellow?: number;
+  homeRed?: number;
+  awayYellow?: number;
+  awayRed?: number;
+  homeFairPlay?: number;
+  awayFairPlay?: number;
 }
 
 // Ordered secondary criteria applied WITHIN a points-block (teams already level on
@@ -27,16 +34,20 @@ type Criterion =
   | 'GOALS_FOR'
   | 'H2H_POINTS'
   | 'H2H_GOAL_DIFF'
-  | 'H2H_GOALS_FOR';
+  | 'H2H_GOALS_FOR'
+  | 'FAIR_PLAY'; // fewest disciplinary points — last objective tiebreak before draw of lots
 
+// FAIR_PLAY closes each preset as the final objective criterion (its FIFA-correct
+// spot, after overall + head-to-head); a draw of lots / FIFA ranking would follow,
+// modelled here as the team-name fallback / admin override.
 const PRESET_CRITERIA: Record<TiebreakPreset, Criterion[]> = {
-  GENERIC: ['GOAL_DIFF', 'GOALS_FOR'],
-  BRASILEIRAO: ['WINS', 'GOAL_DIFF', 'GOALS_FOR', 'H2H_POINTS'],
-  // FIFA: overall GD/GF first, then head-to-head among the tied teams.
-  FIFA: ['GOAL_DIFF', 'GOALS_FOR', 'H2H_POINTS', 'H2H_GOAL_DIFF', 'H2H_GOALS_FOR'],
-  // UEFA: head-to-head first, then overall GD/GF.
-  UEFA: ['H2H_POINTS', 'H2H_GOAL_DIFF', 'H2H_GOALS_FOR', 'GOAL_DIFF', 'GOALS_FOR'],
-  CONMEBOL: ['GOAL_DIFF', 'GOALS_FOR'],
+  GENERIC: ['GOAL_DIFF', 'GOALS_FOR', 'FAIR_PLAY'],
+  BRASILEIRAO: ['WINS', 'GOAL_DIFF', 'GOALS_FOR', 'H2H_POINTS', 'FAIR_PLAY'],
+  // FIFA: overall GD/GF first, then head-to-head among the tied teams, then fair play.
+  FIFA: ['GOAL_DIFF', 'GOALS_FOR', 'H2H_POINTS', 'H2H_GOAL_DIFF', 'H2H_GOALS_FOR', 'FAIR_PLAY'],
+  // UEFA: head-to-head first, then overall GD/GF, then fair play.
+  UEFA: ['H2H_POINTS', 'H2H_GOAL_DIFF', 'H2H_GOALS_FOR', 'GOAL_DIFF', 'GOALS_FOR', 'FAIR_PLAY'],
+  CONMEBOL: ['GOAL_DIFF', 'GOALS_FOR', 'FAIR_PLAY'],
 };
 
 interface Stat {
@@ -47,6 +58,9 @@ interface Stat {
   goalsFor: number;
   goalsAgainst: number;
   points: number;
+  yellow: number;
+  red: number;
+  fairPlay: number;
 }
 
 const emptyStat = (): Stat => ({
@@ -57,6 +71,9 @@ const emptyStat = (): Stat => ({
   goalsFor: 0,
   goalsAgainst: 0,
   points: 0,
+  yellow: 0,
+  red: 0,
+  fairPlay: 0,
 });
 
 @Injectable()
@@ -115,6 +132,12 @@ export class StandingsService {
           awayScore: true,
           status: true,
           kickoffAt: true,
+          homeYellow: true,
+          homeRed: true,
+          awayYellow: true,
+          awayRed: true,
+          homeFairPlay: true,
+          awayFairPlay: true,
         },
       });
       const teams: StandingsTeam[] = group.teams.map((gt) => gt.team);
@@ -160,6 +183,12 @@ export class StandingsService {
       home.goalsAgainst += m.awayScore;
       away.goalsFor += m.awayScore;
       away.goalsAgainst += m.homeScore;
+      home.yellow += m.homeYellow ?? 0;
+      home.red += m.homeRed ?? 0;
+      away.yellow += m.awayYellow ?? 0;
+      away.red += m.awayRed ?? 0;
+      home.fairPlay += m.homeFairPlay ?? 0;
+      away.fairPlay += m.awayFairPlay ?? 0;
       if (m.homeScore > m.awayScore) {
         home.wins++;
         home.points += 3;
@@ -207,6 +236,9 @@ export class StandingsService {
         goalDiff,
         points: s.points,
         pct,
+        yellowCards: s.yellow,
+        redCards: s.red,
+        fairPlay: s.fairPlay,
         form: form.get(team.id) ?? [],
         live: liveTeamIds.has(team.id),
       } satisfies StandingsRow;
@@ -263,6 +295,11 @@ export class StandingsService {
         }
         case 'H2H_GOALS_FOR':
           return h2h.get(r.team.id)?.goalsFor ?? 0;
+        case 'FAIR_PLAY':
+          // fairPlay ≤ 0; less negative = fewer/lighter cards = ranked higher.
+          // Descending sort (valueOf(b) - valueOf(a)) already favours the larger
+          // (less negative) value, so return it directly.
+          return r.fairPlay;
       }
     };
 

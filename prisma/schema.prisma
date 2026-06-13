@@ -386,6 +386,17 @@ model Match {
   // Knockout-only result detail (null for league/group games).
   homePenalties   Int? // shootout score
   awayPenalties   Int?
+  // Discipline (cards), captured by the ESPN robot from the scoreboard feed.
+  // *Yellow/*Red = raw counts for display; *FairPlay = FIFA fair-play points
+  // (negative; single yellow -1, second yellow -3, direct red -4) computed
+  // per-player at ingest and summed per team — the disciplinary tiebreak input.
+  // See architecture/espn-fairplay-spike.md.
+  homeYellow      Int            @default(0)
+  homeRed         Int            @default(0)
+  awayYellow      Int            @default(0)
+  awayRed         Int            @default(0)
+  homeFairPlay    Int            @default(0)
+  awayFairPlay    Int            @default(0)
   winner          MatchWinner? // explicit result orientation when FINISHED
   duration        MatchDuration? // REGULAR / EXTRA_TIME / PENALTY_SHOOTOUT
   // Free-text fallbacks kept for back-compat/display; structure now lives in the FKs above.

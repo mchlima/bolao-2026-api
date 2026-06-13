@@ -50,4 +50,27 @@ describe('bestThirdLetter', () => {
     // Only winners of A,B,D,E,G,I,K,L host a third — C never does.
     expect(bestThirdLetter(thirds, 'C')).toBeNull();
   });
+
+  it('fair play decides which third makes the best-8 cut', () => {
+    // 7 thirds clearly qualify (6 pts); 3 clearly don't (0 pts). The 8th slot is
+    // contested between A and L — level on points/GD/GF, so fair play decides.
+    const winners = ['A', 'B', 'D', 'E', 'G', 'I', 'K', 'L'];
+    const base = [
+      third('B', 6), third('C', 6), third('D', 6), third('E', 6),
+      third('F', 6), third('G', 6), third('H', 6),
+      third('I', 0), third('J', 0), third('K', 0),
+    ];
+    const fp = (s: ThirdSeed, v: number): ThirdSeed => ({ ...s, fairPlay: v });
+    // L cleaner than A → L takes the 8th slot (A would win the name tiebreak).
+    const lWins = [...base, fp(third('A', 3), -5), fp(third('L', 3), 0)];
+    const aWins = [...base, fp(third('A', 3), 0), fp(third('L', 3), -5)];
+
+    const resL = winners.map((w) => bestThirdLetter(lWins, w));
+    const resA = winners.map((w) => bestThirdLetter(aWins, w));
+    // Swapping ONLY the fair-play values flips which team qualifies.
+    expect(resL).toContain('L');
+    expect(resL).not.toContain('A');
+    expect(resA).toContain('A');
+    expect(resA).not.toContain('L');
+  });
 });

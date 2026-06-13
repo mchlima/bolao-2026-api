@@ -21,6 +21,9 @@ export interface StandingsRow {
   goalDiff: number; // SG — saldo de gols
   points: number; // P — pontos
   pct: number; // % — aproveitamento (points / (played*3) * 100, 1 decimal)
+  yellowCards: number; // disciplinary, for display
+  redCards: number;
+  fairPlay: number; // FIFA fair-play points (≤ 0) — disciplinary tiebreak input
   form: ('W' | 'D' | 'L')[]; // last 5 results, oldest → newest
   live: boolean; // true while this team has a match in progress (provisional row)
 }

@@ -94,6 +94,12 @@ export class LiveIngestService {
         status: true,
         homeScore: true,
         awayScore: true,
+        homeYellow: true,
+        homeRed: true,
+        awayYellow: true,
+        awayRed: true,
+        homeFairPlay: true,
+        awayFairPlay: true,
         kickoffAt: true,
         externalId: true,
         homeTeam: { select: { shortName: true, espnAbbr: true } },
@@ -146,6 +152,20 @@ export class LiveIngestService {
               data.homeScore = home;
             if (away !== undefined && away !== m.awayScore)
               data.awayScore = away;
+
+            // Discipline (cards + fair-play) from the same feed — keyed by espnAbbr.
+            const homeAbbr = m.homeTeam!.espnAbbr ?? m.homeTeam!.shortName;
+            const awayAbbr = m.awayTeam!.espnAbbr ?? m.awayTeam!.shortName;
+            const hc = ev.cards[homeAbbr] ?? { yellow: 0, red: 0 };
+            const ac = ev.cards[awayAbbr] ?? { yellow: 0, red: 0 };
+            const hfp = ev.fairPlay[homeAbbr] ?? 0;
+            const afp = ev.fairPlay[awayAbbr] ?? 0;
+            if (hc.yellow !== m.homeYellow) data.homeYellow = hc.yellow;
+            if (hc.red !== m.homeRed) data.homeRed = hc.red;
+            if (ac.yellow !== m.awayYellow) data.awayYellow = ac.yellow;
+            if (ac.red !== m.awayRed) data.awayRed = ac.red;
+            if (hfp !== m.homeFairPlay) data.homeFairPlay = hfp;
+            if (afp !== m.awayFairPlay) data.awayFairPlay = afp;
           }
         }
 

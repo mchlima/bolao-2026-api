@@ -24,13 +24,17 @@ export interface ThirdSeed {
   points: number;
   goalDiff: number;
   goalsFor: number;
+  fairPlay?: number; // FIFA fair-play points (≤ 0); higher = better. Default 0.
   name: string;
 }
 
 /**
- * Pure: rank the third-placed teams (points → GD → GF → name), take the best 8,
- * and look up — via the FIFA Annex C table — which third faces `winnerGroup`.
- * Returns that third's group letter, or null if undecidable. Exported for testing.
+ * Pure: rank the third-placed teams (points → GD → GF → fair play → name), take
+ * the best 8, and look up — via the FIFA Annex C table — which third faces
+ * `winnerGroup`. Returns that third's group letter, or null if undecidable.
+ * Fair play (disciplinary) is the last objective FIFA criterion before the draw
+ * of lots / FIFA ranking (modelled as the name fallback / admin override).
+ * Exported for testing.
  */
 export function bestThirdLetter(
   thirds: ThirdSeed[],
@@ -42,6 +46,7 @@ export function bestThirdLetter(
       b.points - a.points ||
       b.goalDiff - a.goalDiff ||
       b.goalsFor - a.goalsFor ||
+      (b.fairPlay ?? 0) - (a.fairPlay ?? 0) ||
       a.name.localeCompare(b.name, 'pt-BR'),
   );
   const key = ranked
@@ -187,9 +192,10 @@ export class SlotResolverService {
   /**
    * Resolve a "best third-placed team" slot via the FIFA Annex C combination table
    * (WC2026_THIRDS_TABLE). Needs the whole group stage finished: rank the 12 thirds
-   * (points → GD → GF → name), take the best 8, key the table by their group letters,
-   * and read which third faces this slot's winner group. Returns null until decidable;
-   * admin can override. Cards/FIFA-ranking tiebreaks are not modelled (rare → override).
+   * (points → GD → GF → fair play → name), take the best 8, key the table by their
+   * group letters, and read which third faces this slot's winner group. Returns null
+   * until decidable; admin can override. Fair play (cards) now feeds the ranking from
+   * the ESPN robot; only the FIFA-ranking/draw-of-lots final step stays manual.
    */
   private async resolveBestThird(source: {
     stageId: string;
@@ -210,6 +216,7 @@ export class SlotResolverService {
         points: t.row.points,
         goalDiff: t.row.goalDiff,
         goalsFor: t.row.goalsFor,
+        fairPlay: t.row.fairPlay,
         name: t.row.team.name,
       }));
 
