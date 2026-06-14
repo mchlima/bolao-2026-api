@@ -91,10 +91,16 @@ export class LiveIngestService {
         OR: [
           { status: 'LIVE' },
           {
+            // Window is [kickoff − START_WINDOW_MIN, kickoff + END_WINDOW_HOURS]
+            // in real time, i.e. now must sit inside it ⇒ kickoff from 3h ago up
+            // to 15min ahead. (Bounds were previously inverted, which polled 3h
+            // BEFORE kickoff and stopped 15min AFTER — so a match left SCHEDULED
+            // past kickoff+15min, e.g. when a kickoff edge was missed, fell out
+            // of the window and the robot could never recover it to LIVE.)
             status: 'SCHEDULED',
             kickoffAt: {
-              gte: new Date(now.getTime() - START_WINDOW_MIN * 60_000),
-              lte: new Date(now.getTime() + END_WINDOW_HOURS * 3_600_000),
+              gte: new Date(now.getTime() - END_WINDOW_HOURS * 3_600_000),
+              lte: new Date(now.getTime() + START_WINDOW_MIN * 60_000),
             },
           },
           {
