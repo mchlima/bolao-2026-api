@@ -17,10 +17,18 @@ export class CompetitionsService {
 
   async findAll(
     query: QueryCompetitionsDto,
-  ): Promise<Paginated<Competition & { seasonCount: number }>> {
-    const { page, pageSize, search, type } = query;
+  ): Promise<
+    Paginated<
+      Competition & {
+        seasonCount: number;
+        sport: { id: string; slug: string; name: string };
+      }
+    >
+  > {
+    const { page, pageSize, search, type, sportId } = query;
     const where: Prisma.CompetitionWhereInput = {
       ...(type && { type }),
+      ...(sportId && { sportId }),
       ...(search && { name: { contains: search, mode: 'insensitive' } }),
     };
 
@@ -30,7 +38,10 @@ export class CompetitionsService {
         orderBy: { name: 'asc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: { _count: { select: { seasons: true } } },
+        include: {
+          _count: { select: { seasons: true } },
+          sport: { select: { id: true, slug: true, name: true } },
+        },
       }),
       this.prisma.competition.count({ where }),
     ]);
