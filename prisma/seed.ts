@@ -63,7 +63,7 @@ async function seedWorldCup(): Promise<void> {
       slug: 'fifa.world',
       type: 'LEAGUE_CUP',
       confederation: 'FIFA',
-      espnLeagueSlug: 'fifa.world',
+      externalIds: { espn: { slug: 'fifa.world' } },
     },
   });
 

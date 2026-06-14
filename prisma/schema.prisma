@@ -73,6 +73,7 @@ enum MatchStatus {
   LIVE
   FINISHED
   CANCELLED
+  POSTPONED // adiada sem nova data (ex.: clube em competição continental) — kickoff é placeholder
 }
 
 // How a leg/match was decided — drives display ("após prorrogação", "nos pênaltis").
@@ -163,7 +164,10 @@ model Competition {
   country        String? // null for international/continental competitions
   confederation  String? // "FIFA", "UEFA", "CONMEBOL", "CBF"...
   logoUrl        String?
-  espnLeagueSlug String? // ESPN league slug for the live robot (e.g. "fifa.world", "conmebol.libertadores")
+  // External provider refs in one JSON blob, e.g.
+  // { "espn": { "slug": "bra.1" }, "ge": { "championshipId": "<uuid>", "phase": "<slug>" } }.
+  // espn.slug is the league the live robot polls. (Replaces espnLeagueSlug.)
+  externalIds    Json?
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
@@ -210,6 +214,10 @@ model Stage {
   order            Int // display/processing order within the season
   tiebreakPreset   TiebreakPreset @default(GENERIC)
   tiebreakOverride Json? // optional ordered criteria array overriding the preset
+  // Classification colour bands for a LEAGUE table, e.g. the Brasileirão zones
+  // sourced from ge.globo: [{ from, to, label, tone }] (tone: green|blue|teal|red).
+  // null = no bands. Positions are 1-based and inclusive.
+  zones            Json?
   hasThirdPlace    Boolean        @default(false)
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
@@ -316,10 +324,6 @@ model Team {
   id          String   @id @default(cuid())
   name        String
   shortName   String // sigla de EXIBIÇÃO (pode ser pt-BR, ex.: EUA, ALE, COR)
-  // ESPN team abbreviation — the key the live-ingest robot matches scores by
-  // (ESPN keys goals by abbreviation). Kept stable in ESPN's codes so shortName
-  // is free to be localized without breaking score ingestion. Backfilled = shortName.
-  espnAbbr    String?
   type        TeamType
   // NATIONAL_TEAM:
   // ISO 3166-1 alpha-2 (drives country-flag-icons); GB-ENG/GB-SCT/GB-WLS/GB-NIR for UK nations.
@@ -330,8 +334,11 @@ model Team {
   country     String?
   logoUrl     String?
   logoDarkUrl String? // dark-theme crest variant (ESPN serves a -dark logo)
-  // ESPN-sourced club metadata (idempotent seeding + robot match-by-id; UI theming):
-  espnId      String?  @unique // ESPN team id — stable external key (club siglas collide across leagues)
+  // External provider refs (ESPN, GE, …) in one JSON blob, e.g.
+  // { "espn": { "id": "2029", "code": "PAL" }, "ge": { "id": "275", "code": "PAL" } }.
+  // espn.code is the live robot's score match key; espn.id is the stable seed key.
+  // (Replaces the former espnId/espnAbbr columns.)
+  externalIds Json?
   color       String? // primary brand color (hex, no #)
   colorAlt    String? // secondary/alternate brand color (hex, no #)
   createdAt   DateTime @default(now())
@@ -406,9 +413,10 @@ model Match {
   // Manual override for the prediction window. NULL = follow the automatic rule
   // (open while SCHEDULED and before kickoff); true/false force open/closed.
   predictionsOpen Boolean?
-  // Auto score/lifecycle (ESPN robot). externalId links to the provider fixture;
-  // autoManaged false means the admin took over and the robot must skip it.
-  externalId      String?
+  // Auto score/lifecycle (ESPN robot). externalIds links to provider fixtures, e.g.
+  // { "espn": { "id": "401841141" }, "ge": { "id": "346405" } } — espn.id is the
+  // robot's event link. autoManaged false means the admin took over (robot skips).
+  externalIds     Json?
   autoManaged     Boolean        @default(true)
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt

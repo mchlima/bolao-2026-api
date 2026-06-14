@@ -23,7 +23,13 @@ export class TeamsService {
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
           { shortName: { contains: search, mode: 'insensitive' } },
-          { espnAbbr: { contains: search, mode: 'insensitive' } },
+          // ESPN code lives in externalIds.espn.code (uppercase); match it there.
+          {
+            externalIds: {
+              path: ['espn', 'code'],
+              string_contains: search.toUpperCase(),
+            },
+          },
           { country: { contains: search, mode: 'insensitive' } },
         ],
       }),

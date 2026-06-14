@@ -22,6 +22,7 @@ import { StorageModule } from './storage/storage.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { LiveIngestModule } from './live-ingest/live-ingest.module';
 import { MatchWindowModule } from './match-window/match-window.module';
+import { SeasonRefreshModule } from './season-refresh/season-refresh.module';
 import { EventsModule } from './events/events.module';
 
 @Module({
@@ -48,6 +49,7 @@ import { EventsModule } from './events/events.module';
     AdminModule,
     LiveIngestModule,
     MatchWindowModule,
+    SeasonRefreshModule,
   ],
   controllers: [AppController],
   providers: [AppService],

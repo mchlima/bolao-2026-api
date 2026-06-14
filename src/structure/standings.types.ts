@@ -37,9 +37,19 @@ export interface GroupStandings {
   rows: StandingsRow[];
 }
 
+// Classification colour band for a LEAGUE table (e.g. Brasileirão zones from
+// ge.globo). Positions are 1-based and inclusive.
+export interface StandingsZone {
+  from: number;
+  to: number;
+  label: string;
+  tone: 'green' | 'blue' | 'teal' | 'red';
+}
+
 export interface StageStandings {
   stageId: string;
   stageName: string;
   format: 'LEAGUE' | 'GROUP';
   groups: GroupStandings[];
+  zones?: StandingsZone[] | null; // LEAGUE colour bands; null/absent for groups
 }

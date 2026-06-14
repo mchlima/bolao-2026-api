@@ -6,6 +6,7 @@ import {
 import { Competition, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { Paginated, paginated } from '../common/pagination';
+import { mergeExternalIds } from '../common/external-ids';
 import { CreateCompetitionDto } from './dto/create-competition.dto';
 import { QueryCompetitionsDto } from './dto/query-competitions.dto';
 import { UpdateCompetitionDto } from './dto/update-competition.dto';
@@ -56,13 +57,30 @@ export class CompetitionsService {
 
   async create(dto: CreateCompetitionDto): Promise<Competition> {
     await this.assertSlugFree(dto.slug);
-    return this.prisma.competition.create({ data: dto });
+    // espnLeagueSlug is an API convenience; it's stored under externalIds.espn.slug.
+    const { espnLeagueSlug, ...rest } = dto;
+    return this.prisma.competition.create({
+      data: {
+        ...rest,
+        ...(espnLeagueSlug
+          ? { externalIds: { espn: { slug: espnLeagueSlug } } }
+          : {}),
+      },
+    });
   }
 
   async update(id: string, dto: UpdateCompetitionDto): Promise<Competition> {
-    await this.findOne(id);
+    const existing = await this.findOne(id);
     if (dto.slug) await this.assertSlugFree(dto.slug, id);
-    return this.prisma.competition.update({ where: { id }, data: dto });
+    const { espnLeagueSlug, ...rest } = dto;
+    const data: Prisma.CompetitionUpdateInput = { ...rest };
+    if (espnLeagueSlug !== undefined) {
+      // Merge so other providers' refs (e.g. ge) are preserved.
+      data.externalIds = mergeExternalIds(existing.externalIds, 'espn', {
+        slug: espnLeagueSlug || undefined,
+      });
+    }
+    return this.prisma.competition.update({ where: { id }, data });
   }
 
   async remove(id: string): Promise<void> {

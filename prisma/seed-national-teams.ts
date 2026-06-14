@@ -157,10 +157,12 @@ async function run(): Promise<void> {
 
   const ours = await prisma.team.findMany({
     where: { type: TeamType.NATIONAL_TEAM },
-    select: { id: true, shortName: true, espnAbbr: true, countryCode: true, logoUrl: true, logoDarkUrl: true },
+    select: { id: true, shortName: true, externalIds: true, countryCode: true, logoUrl: true, logoDarkUrl: true },
   });
-  // Match ESPN abbreviation against our espnAbbr (shortName may be localized pt-BR).
-  const byAbbr = new Map(ours.map((o) => [(o.espnAbbr ?? o.shortName).toUpperCase(), o]));
+  // Match ESPN abbreviation against our espn code (shortName may be localized pt-BR).
+  const espnCodeOf = (o: { externalIds: unknown }): string | undefined =>
+    (o.externalIds as { espn?: { code?: string } } | null)?.espn?.code;
+  const byAbbr = new Map(ours.map((o) => [(espnCodeOf(o) ?? o.shortName).toUpperCase(), o]));
   const byCC = new Map(ours.filter((o) => o.countryCode).map((o) => [o.countryCode!, o]));
 
   let updated = 0, created = 0, crests = 0, failed = 0;
@@ -180,8 +182,11 @@ async function run(): Promise<void> {
       const data = {
         name: ptBrName(abbr, cc, t.displayName), // pt-BR via ICU + overrides
         shortName: SIGLA_PT[abbr] ?? abbr, // pt-BR display sigla (fallback ESPN)
-        espnAbbr: abbr, // ESPN abbreviation — robot's stable match key
-        espnId: t.id,
+        // espn.code = robot's stable match key; preserve any other provider refs.
+        externalIds: {
+          ...((row?.externalIds as Record<string, unknown>) ?? {}),
+          espn: { id: t.id, code: abbr },
+        },
         color: t.color ?? null,
         colorAlt: t.alternateColor ?? null,
         logoUrl,
