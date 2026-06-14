@@ -193,9 +193,10 @@ async function run(): Promise<void> {
   for (let n = 1; n <= 38; n++) rounds.push(await ge<GeGame[]>(`/rodada/${n}/jogos/`));
   console.log(`  ge: ${cls.classificacao.length} clubes, ${rounds.flat().length} jogos`);
 
-  // 2. Competition (idempotent by slug). espn.slug → live robot; ge → structure refresh.
+  // 2. Competition (idempotent by sport+slug). espn.slug → live robot; ge → structure refresh.
+  const sport = await prisma.sport.findFirstOrThrow({ where: { slug: 'futebol' } });
   const competition = await prisma.competition.upsert({
-    where: { slug: ESPN_SLUG },
+    where: { sportId_slug: { sportId: sport.id, slug: ESPN_SLUG } },
     update: {
       externalIds: {
         espn: { slug: ESPN_SLUG },
@@ -203,6 +204,7 @@ async function run(): Promise<void> {
       },
     },
     create: {
+      sportId: sport.id,
       name: 'Campeonato Brasileiro Série A',
       slug: ESPN_SLUG,
       type: 'LEAGUE',

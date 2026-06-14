@@ -55,10 +55,12 @@ async function seedStadiums(): Promise<void> {
 async function seedWorldCup(): Promise<void> {
   // Competition (timeless parent; idempotent by slug). Holds the ESPN league slug
   // that the live robot uses to poll scores for this and future editions.
+  const sport = await prisma.sport.findFirstOrThrow({ where: { slug: 'futebol' } });
   const competition = await prisma.competition.upsert({
-    where: { slug: 'fifa.world' },
+    where: { sportId_slug: { sportId: sport.id, slug: 'fifa.world' } },
     update: {},
     create: {
+      sportId: sport.id,
       name: 'Copa do Mundo FIFA',
       slug: 'fifa.world',
       type: 'LEAGUE_CUP',
@@ -86,6 +88,7 @@ async function seedWorldCup(): Promise<void> {
 
   // Lookups: countryCode → team id, stadium name → id.
   const teams = await prisma.team.findMany({
+    where: { sportId: sport.id },
     select: { id: true, countryCode: true },
   });
   const teamByCode = new Map(

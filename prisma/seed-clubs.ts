@@ -176,6 +176,7 @@ async function run(): Promise<void> {
     throw new Error(`unknown region "${region}" (use: ${Object.keys(REGIONS).join(' | ')})`);
   }
   console.log(`Seeding clubs — region: ${region}`);
+  const sportId = (await prisma.sport.findFirstOrThrow({ where: { slug: 'futebol' } })).id;
   let created = 0,
     updated = 0,
     crests = 0,
@@ -230,7 +231,7 @@ async function run(): Promise<void> {
           });
           updated++;
         } else {
-          await prisma.team.create({ data: { ...data, externalIds } });
+          await prisma.team.create({ data: { ...data, externalIds, sportId } });
           created++;
         }
       } catch (e) {

@@ -47,4 +47,8 @@ export class UpdateCompetitionDto {
   @IsString()
   @MaxLength(80)
   espnLeagueSlug?: string;
+
+  @IsOptional()
+  @IsString()
+  sportId?: string;
 }

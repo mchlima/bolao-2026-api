@@ -106,8 +106,12 @@ export class TeamsService {
     return team;
   }
 
-  create(dto: CreateTeamDto): Promise<Team> {
-    return this.prisma.team.create({ data: dto });
+  async create(dto: CreateTeamDto): Promise<Team> {
+    const sportId =
+      dto.sportId ??
+      (await this.prisma.sport.findFirstOrThrow({ where: { slug: 'futebol' } }))
+        .id;
+    return this.prisma.team.create({ data: { ...dto, sportId } });
   }
 
   async update(id: string, dto: UpdateTeamDto): Promise<Team> {

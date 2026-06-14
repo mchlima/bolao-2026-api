@@ -46,4 +46,9 @@ export class CreateCompetitionDto {
   @IsString()
   @MaxLength(80)
   espnLeagueSlug?: string;
+
+  // Sport this competition belongs to. Defaults to Futebol when omitted.
+  @IsOptional()
+  @IsString()
+  sportId?: string;
 }

@@ -58,4 +58,9 @@ export class CreateTeamDto {
   @IsString()
   @MaxLength(12)
   colorAlt?: string;
+
+  // Sport this team belongs to. Defaults to Futebol when omitted.
+  @IsOptional()
+  @IsString()
+  sportId?: string;
 }

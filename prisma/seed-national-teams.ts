@@ -155,8 +155,9 @@ async function run(): Promise<void> {
   const espn = [...byId.values()];
   console.log(`ESPN national teams aggregated: ${espn.length}`);
 
+  const sportId = (await prisma.sport.findFirstOrThrow({ where: { slug: 'futebol' } })).id;
   const ours = await prisma.team.findMany({
-    where: { type: TeamType.NATIONAL_TEAM },
+    where: { type: TeamType.NATIONAL_TEAM, sportId },
     select: { id: true, shortName: true, externalIds: true, countryCode: true, logoUrl: true, logoDarkUrl: true },
   });
   // Match ESPN abbreviation against our espn code (shortName may be localized pt-BR).
@@ -197,7 +198,7 @@ async function run(): Promise<void> {
         updated++;
       } else {
         await prisma.team.create({
-          data: { ...data, type: TeamType.NATIONAL_TEAM, countryCode: NEW_CC[abbr] ?? null },
+          data: { ...data, sportId, type: TeamType.NATIONAL_TEAM, countryCode: NEW_CC[abbr] ?? null },
         });
         created++;
       }

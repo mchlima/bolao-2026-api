@@ -56,12 +56,14 @@ export class CompetitionsService {
   }
 
   async create(dto: CreateCompetitionDto): Promise<Competition> {
-    await this.assertSlugFree(dto.slug);
+    const sportId = dto.sportId ?? (await this.defaultSportId());
+    await this.assertSlugFree(sportId, dto.slug);
     // espnLeagueSlug is an API convenience; it's stored under externalIds.espn.slug.
     const { espnLeagueSlug, ...rest } = dto;
     return this.prisma.competition.create({
       data: {
         ...rest,
+        sportId, // explicit value wins over rest.sportId (resolved/default above)
         ...(espnLeagueSlug
           ? { externalIds: { espn: { slug: espnLeagueSlug } } }
           : {}),
@@ -71,7 +73,8 @@ export class CompetitionsService {
 
   async update(id: string, dto: UpdateCompetitionDto): Promise<Competition> {
     const existing = await this.findOne(id);
-    if (dto.slug) await this.assertSlugFree(dto.slug, id);
+    const sportId = dto.sportId ?? existing.sportId;
+    if (dto.slug) await this.assertSlugFree(sportId, dto.slug, id);
     const { espnLeagueSlug, ...rest } = dto;
     const data: Prisma.CompetitionUpdateInput = { ...rest };
     if (espnLeagueSlug !== undefined) {
@@ -88,9 +91,22 @@ export class CompetitionsService {
     await this.prisma.competition.delete({ where: { id } });
   }
 
-  private async assertSlugFree(slug: string, exceptId?: string): Promise<void> {
-    const existing = await this.prisma.competition.findUnique({
-      where: { slug },
+  /** Default sport for competitions created without an explicit one (Futebol). */
+  private async defaultSportId(): Promise<string> {
+    const sport = await this.prisma.sport.findFirstOrThrow({
+      where: { slug: 'futebol' },
+    });
+    return sport.id;
+  }
+
+  // Slug is unique PER SPORT, so the check is scoped to the competition's sport.
+  private async assertSlugFree(
+    sportId: string,
+    slug: string,
+    exceptId?: string,
+  ): Promise<void> {
+    const existing = await this.prisma.competition.findFirst({
+      where: { sportId, slug },
     });
     if (existing && existing.id !== exceptId) {
       throw new ConflictException({

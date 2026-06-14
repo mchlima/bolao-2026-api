@@ -158,8 +158,9 @@ model User {
 // league via .../soccer/<slug>/scoreboard (one engine, many tournaments).
 model Competition {
   id             String          @id @default(cuid())
+  sportId        String // the sport this competition belongs to (default: Futebol)
   name           String
-  slug           String          @unique // internal stable key, e.g. "fifa.world", "bra.1"
+  slug           String // internal stable key, e.g. "fifa.world", "bra.1" (unique per sport)
   type           CompetitionType
   country        String? // null for international/continental competitions
   confederation  String? // "FIFA", "UEFA", "CONMEBOL", "CBF"...
@@ -171,9 +172,31 @@ model Competition {
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
+  sport   Sport     @relation(fields: [sportId], references: [id])
   seasons Season[]
 
+  @@unique([sportId, slug])
+  @@index([sportId])
   @@map("competitions")
+}
+
+// A Sport (Futebol, and later others). A thin top-level entity so competitions,
+// teams and the public hub can be grouped/filtered/namespaced per sport. The
+// sport-specific machinery (live providers, standings rules, score shape) stays
+// in the football code until a second sport is real.
+model Sport {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique // URL namespace, e.g. "futebol"
+  iconUrl   String?
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  competitions Competition[]
+  teams        Team[]
+
+  @@map("sports")
 }
 
 // A Season is one edition of a Competition ("Copa do Mundo FIFA 2026"). It owns
@@ -322,13 +345,16 @@ model Tie {
 
 model Team {
   id          String   @id @default(cuid())
+  sportId     String // the sport this team belongs to (default: Futebol)
   name        String
   shortName   String // sigla de EXIBIÇÃO (pode ser pt-BR, ex.: EUA, ALE, COR)
   type        TeamType
   // NATIONAL_TEAM:
   // ISO 3166-1 alpha-2 (drives country-flag-icons); GB-ENG/GB-SCT/GB-WLS/GB-NIR for UK nations.
-  // @unique is sparse (NULL allowed for many CLUB rows) — enables idempotent national-team seeding.
-  countryCode String?  @unique
+  // Unique PER SPORT (sparse: NULL for CLUB rows) — one national team per country per
+  // sport, so "Brasil futebol" and a future "Brasil vôlei" don't collide. Enables
+  // idempotent national-team seeding scoped to the sport.
+  countryCode String?
   continent   String?
   // CLUB:
   country     String?
@@ -344,6 +370,7 @@ model Team {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  sport       Sport       @relation(fields: [sportId], references: [id])
   homeMatches Match[]     @relation("HomeTeam")
   awayMatches Match[]     @relation("AwayTeam")
   groupTeams  GroupTeam[]
@@ -352,6 +379,8 @@ model Team {
   wonTies     Tie[]       @relation("TieWinner")
   wonSeasons  Season[]    @relation("SeasonWinner")
 
+  @@unique([sportId, countryCode])
+  @@index([sportId])
   @@map("teams")
 }
 
