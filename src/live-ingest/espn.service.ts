@@ -30,15 +30,23 @@ export function playerFairPlay(yellows: number, reds: number): number {
 }
 
 const DEFAULT_LEAGUE_SLUG = 'fifa.world';
-const scoreboardUrl = (slug: string): string =>
-  `https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/scoreboard`;
+// `dates` is YYYYMMDD or a YYYYMMDD-YYYYMMDD range. Without it, ESPN returns only
+// its own current "day", which lags real UTC time (it stays on the last day that
+// had matches), so the FIRST fixture of the next day — e.g. a 00:00 ET / late-UTC
+// kickoff — never appears and the robot can't see it go LIVE. The caller passes
+// the UTC date span of the in-window matches so every fixture is queried by its
+// actual kickoff date.
+const scoreboardUrl = (slug: string, dates?: string): string =>
+  `https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/scoreboard` +
+  (dates ? `?dates=${dates}` : '');
 
 /**
  * Reads a league's scoreboard from ESPN's public (unofficial) site API. The
  * league slug (e.g. "fifa.world", "bra.1", "conmebol.libertadores") comes from
  * the Competition, so one engine serves every tournament. No key required.
- * Returns [] on any failure — the caller must degrade gracefully (manual control
- * still works). Easy to swap for a keyed provider later.
+ * `dates` (YYYYMMDD or a range) pins the query to specific UTC days instead of
+ * ESPN's lagging default day. Returns [] on any failure — the caller must degrade
+ * gracefully (manual control still works). Easy to swap for a keyed provider later.
  */
 @Injectable()
 export class EspnService {
@@ -46,10 +54,11 @@ export class EspnService {
 
   async fetchScoreboard(
     slug: string = DEFAULT_LEAGUE_SLUG,
+    dates?: string,
   ): Promise<EspnEvent[]> {
     let res: Response;
     try {
-      res = await fetch(scoreboardUrl(slug), {
+      res = await fetch(scoreboardUrl(slug, dates), {
         headers: { accept: 'application/json' },
         signal: AbortSignal.timeout(8000),
       });

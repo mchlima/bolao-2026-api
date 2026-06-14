@@ -6,6 +6,24 @@ import { EspnEvent, EspnService } from './espn.service';
 import { EventsService } from '../events/events.service';
 import { SlotResolverService } from '../structure/slot-resolver.service';
 
+const DAY_MS = 86_400_000;
+const ymdUtc = (ms: number): string =>
+  new Date(ms).toISOString().slice(0, 10).replace(/-/g, '');
+
+/**
+ * The ESPN `dates` query (YYYYMMDD or YYYYMMDD-YYYYMMDD) covering a group of
+ * in-window matches, so each fixture is fetched by its own kickoff date instead
+ * of ESPN's lagging default day (which omits the next day's first match). Padded
+ * ±1 day to absorb any drift between our stored kickoff and ESPN's event date at
+ * the UTC boundary; extra events are harmless (findEvent filters by id/abbrs).
+ */
+function scoreboardDates(group: Array<{ kickoffAt: Date }>): string {
+  const times = group.map((m) => m.kickoffAt.getTime());
+  const from = ymdUtc(Math.min(...times) - DAY_MS);
+  const to = ymdUtc(Math.max(...times) + DAY_MS);
+  return from === to ? from : `${from}-${to}`;
+}
+
 const STATE_TO_STATUS: Record<EspnEvent['state'], MatchStatus> = {
   pre: 'SCHEDULED',
   in: 'LIVE',
@@ -123,7 +141,7 @@ export class LiveIngestService {
     const finishedSeasons = new Set<string>();
 
     for (const [slug, group] of bySlug) {
-      const events = await this.espn.fetchScoreboard(slug);
+      const events = await this.espn.fetchScoreboard(slug, scoreboardDates(group));
       if (events.length === 0) continue;
 
       for (const m of group) {
