@@ -213,6 +213,10 @@ model Stage {
   order            Int // display/processing order within the season
   tiebreakPreset   TiebreakPreset @default(GENERIC)
   tiebreakOverride Json? // optional ordered criteria array overriding the preset
+  // Classification colour bands for a LEAGUE table, e.g. the Brasileirão zones
+  // sourced from ge.globo: [{ from, to, label, tone }] (tone: green|blue|teal|red).
+  // null = no bands. Positions are 1-based and inclusive.
+  zones            Json?
   hasThirdPlace    Boolean        @default(false)
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt

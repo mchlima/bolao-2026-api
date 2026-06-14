@@ -154,6 +154,7 @@ export class StandingsService {
       stageName: stage.name,
       format: stage.format as 'LEAGUE' | 'GROUP',
       groups,
+      zones: (stage.zones as StageStandings['zones']) ?? null,
     };
   }
 

@@ -120,14 +120,42 @@ const CLUB_HOME_STADIUM: Record<string, string> = {
 
 // ── ge.globo response shapes (only the bits we read) ──
 interface GeClassRow {
+  ordem: number;
   nome_popular: string;
   sigla: string;
   escudo: string;
   equipe_id: number;
+  faixa_classificacao_cor?: string | null;
 }
 interface GeClass {
   edicao: { data_inicio: string; data_fim: string; nome: string };
+  faixas_classificacao: { cor: string; nome: string }[];
   classificacao: GeClassRow[];
+}
+
+// ge.globo faixa colour → our StandingsTable tone. ge: Libertadores blue,
+// Pré-Libertadores cyan, Sul-Americana green, Rebaixados red.
+const TONE_BY_COLOR: Record<string, 'green' | 'blue' | 'teal' | 'red'> = {
+  '#0000ff': 'green', // Libertadores → green (top/qualify)
+  '#00ffff': 'blue', // Pré-Libertadores
+  '#008040': 'teal', // Sul-Americana
+  '#ff0000': 'red', // Rebaixamento
+};
+
+/** Derive contiguous classification bands [{from,to,label,tone}] from ge.globo's
+ *  per-position faixa colours (handles the cup-winner shifts ge applies). */
+function deriveZones(cls: GeClass): Array<{ from: number; to: number; label: string; tone: string }> {
+  const nameByColor = new Map(cls.faixas_classificacao.map((f) => [f.cor.toLowerCase(), f.nome]));
+  const zones: Array<{ from: number; to: number; label: string; tone: string; color: string }> = [];
+  for (const r of [...cls.classificacao].sort((a, b) => a.ordem - b.ordem)) {
+    const color = (r.faixa_classificacao_cor ?? '').toLowerCase();
+    const tone = TONE_BY_COLOR[color];
+    if (!tone) continue; // positions with no faixa (mid-table) break the run
+    const last = zones[zones.length - 1];
+    if (last && last.color === color && last.to === r.ordem - 1) last.to = r.ordem;
+    else zones.push({ from: r.ordem, to: r.ordem, label: nameByColor.get(color) ?? '', tone, color });
+  }
+  return zones.map(({ color: _c, ...z }) => z);
 }
 interface GeGame {
   id: number;
@@ -247,6 +275,11 @@ async function run(): Promise<void> {
     (await prisma.group.create({
       data: { stageId: stage.id, name: 'Série A', order: 1 },
     }));
+
+  // Classification bands (Libertadores/Pré-Libertadores/Sul-Americana/Rebaixamento)
+  // straight from ge.globo's current faixas — re-running the seed refreshes them.
+  const zones = deriveZones(cls);
+  await prisma.stage.update({ where: { id: stage.id }, data: { zones } });
   for (const teamId of teamByGeId.values()) {
     await prisma.groupTeam.upsert({
       where: { groupId_teamId: { groupId: group.id, teamId } },
@@ -266,6 +299,17 @@ async function run(): Promise<void> {
     stadiumByName.set(s.name, row.id);
   }
 
+  // Existing match externalIds (by matchNumber) so a re-seed preserves refs set
+  // by other processes — notably espn.id from the live robot / cards backfill.
+  const existingExt = new Map<number, Record<string, unknown>>();
+  for (const m of await prisma.match.findMany({
+    where: { seasonId: season.id },
+    select: { matchNumber: true, externalIds: true },
+  })) {
+    if (m.matchNumber != null)
+      existingExt.set(m.matchNumber, (m.externalIds as Record<string, unknown>) ?? {});
+  }
+
   // 7. Rounds + Matches.
   let matchNumber = 0;
   let played = 0;
@@ -276,6 +320,16 @@ async function run(): Promise<void> {
       (await prisma.round.create({
         data: { stageId: stage.id, number, legs: 1, order: number },
       }));
+
+    // Fallback kickoff for games ge.globo hasn't dated yet (postponed/TBD): the
+    // round's own date, not the season start — avoids a bogus "1 Jan 00:00".
+    const roundTimes = rounds[i]
+      .map((g) => g.data_realizacao)
+      .filter((d): d is string => !!d)
+      .map((d) => brtToUtc(d).getTime());
+    const roundFallback = roundTimes.length
+      ? new Date(Math.min(...roundTimes))
+      : new Date(seasonData.startDate);
 
     for (const g of rounds[i]) {
       matchNumber++;
@@ -299,7 +353,7 @@ async function run(): Promise<void> {
         roundId: round.id,
         groupName: group.name, // drives the match page's classification + round card
         matchNumber,
-        kickoffAt: g.data_realizacao ? brtToUtc(g.data_realizacao) : new Date(seasonData.startDate),
+        kickoffAt: g.data_realizacao ? brtToUtc(g.data_realizacao) : roundFallback,
         stadiumId,
         homeTeamId,
         awayTeamId,
@@ -307,7 +361,8 @@ async function run(): Promise<void> {
         homeScore: finished ? hs : 0,
         awayScore: finished ? as : 0,
         winner: winner as 'HOME' | 'AWAY' | 'DRAW' | null,
-        externalIds: { ge: { id: String(g.id) } },
+        // Merge so a re-seed keeps espn.id (live robot / backfill) and any other ref.
+        externalIds: { ...(existingExt.get(matchNumber) ?? {}), ge: { id: String(g.id) } },
       };
 
       await prisma.match.upsert({
