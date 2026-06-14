@@ -73,6 +73,7 @@ enum MatchStatus {
   LIVE
   FINISHED
   CANCELLED
+  POSTPONED // adiada sem nova data (ex.: clube em competição continental) — kickoff é placeholder
 }
 
 // How a leg/match was decided — drives display ("após prorrogação", "nos pênaltis").

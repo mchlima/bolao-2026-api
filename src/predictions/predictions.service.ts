@@ -119,6 +119,9 @@ export class PredictionsService {
     if (match.homeTeamId == null || match.awayTeamId == null) return false;
     if (match.status === 'FINISHED' || match.status === 'CANCELLED')
       return false;
+    // Postponed: no real date yet (kickoffAt is a placeholder), so it stays open
+    // until rescheduled — skip the kickoff gate. Admin can still close it early.
+    if (match.status === 'POSTPONED') return match.predictionsOpen ?? true;
     // Hard gate: once kickoff passes (or the match is no longer SCHEDULED), the
     // window is closed regardless of the override.
     if (new Date() >= match.kickoffAt) return false;

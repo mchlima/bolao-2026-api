@@ -345,6 +345,10 @@ async function run(): Promise<void> {
       const as = g.placar_oficial_visitante ?? 0;
       const winner = finished ? (hs > as ? 'HOME' : hs < as ? 'AWAY' : 'DRAW') : null;
       if (finished) played++;
+      // No ge date and not played → postponed/TBD (kickoffAt is the round placeholder).
+      const status = (
+        finished ? 'FINISHED' : g.data_realizacao ? 'SCHEDULED' : 'POSTPONED'
+      ) as 'FINISHED' | 'SCHEDULED' | 'POSTPONED';
 
       const matchData = {
         seasonId: season.id,
@@ -357,7 +361,7 @@ async function run(): Promise<void> {
         stadiumId,
         homeTeamId,
         awayTeamId,
-        status: finished ? ('FINISHED' as const) : ('SCHEDULED' as const),
+        status,
         homeScore: finished ? hs : 0,
         awayScore: finished ? as : 0,
         winner: winner as 'HOME' | 'AWAY' | 'DRAW' | null,
