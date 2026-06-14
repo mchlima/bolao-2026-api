@@ -5,6 +5,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EspnEvent, EspnService } from './espn.service';
 import { EventsService } from '../events/events.service';
 import { SlotResolverService } from '../structure/slot-resolver.service';
+import {
+  espnCode,
+  espnExternalId,
+  espnSlug,
+  mergeExternalIds,
+} from '../common/external-ids';
 
 const DAY_MS = 86_400_000;
 const ymdUtc = (ms: number): string =>
@@ -125,11 +131,11 @@ export class LiveIngestService {
         homeFairPlay: true,
         awayFairPlay: true,
         kickoffAt: true,
-        externalId: true,
-        homeTeam: { select: { shortName: true, espnAbbr: true } },
-        awayTeam: { select: { shortName: true, espnAbbr: true } },
+        externalIds: true,
+        homeTeam: { select: { shortName: true, externalIds: true } },
+        awayTeam: { select: { shortName: true, externalIds: true } },
         season: {
-          select: { competition: { select: { espnLeagueSlug: true } } },
+          select: { competition: { select: { externalIds: true } } },
         },
       },
     });
@@ -139,7 +145,7 @@ export class LiveIngestService {
     // serves every match of that tournament in the window.
     const bySlug = new Map<string, typeof candidates>();
     for (const m of candidates) {
-      const slug = m.season.competition.espnLeagueSlug ?? 'fifa.world';
+      const slug = espnSlug(m.season.competition.externalIds) ?? 'fifa.world';
       (bySlug.get(slug) ?? bySlug.set(slug, []).get(slug)!).push(m);
     }
 
@@ -155,7 +161,10 @@ export class LiveIngestService {
         if (!ev) continue;
 
         const data: Prisma.MatchUpdateInput = {};
-        if (!m.externalId) data.externalId = ev.id;
+        if (!espnExternalId(m.externalIds))
+          data.externalIds = mergeExternalIds(m.externalIds, 'espn', {
+            id: ev.id,
+          });
 
         if (/POSTPONED|CANCEL|SUSPEND/i.test(ev.statusName)) {
           // Decision: leave postponed/cancelled to the admin — just log it once.
@@ -169,17 +178,17 @@ export class LiveIngestService {
             // Match scores by ESPN abbreviation (espnAbbr), NOT the display
             // shortName — shortName may be localized (pt-BR). Fallback for safety.
             const home =
-              ev.scores[m.homeTeam!.espnAbbr ?? m.homeTeam!.shortName];
+              ev.scores[espnCode(m.homeTeam!.externalIds) ?? m.homeTeam!.shortName];
             const away =
-              ev.scores[m.awayTeam!.espnAbbr ?? m.awayTeam!.shortName];
+              ev.scores[espnCode(m.awayTeam!.externalIds) ?? m.awayTeam!.shortName];
             if (home !== undefined && home !== m.homeScore)
               data.homeScore = home;
             if (away !== undefined && away !== m.awayScore)
               data.awayScore = away;
 
-            // Discipline (cards + fair-play) from the same feed — keyed by espnAbbr.
-            const homeAbbr = m.homeTeam!.espnAbbr ?? m.homeTeam!.shortName;
-            const awayAbbr = m.awayTeam!.espnAbbr ?? m.awayTeam!.shortName;
+            // Discipline (cards + fair-play) from the same feed — keyed by espn code.
+            const homeAbbr = espnCode(m.homeTeam!.externalIds) ?? m.homeTeam!.shortName;
+            const awayAbbr = espnCode(m.awayTeam!.externalIds) ?? m.awayTeam!.shortName;
             const hc = ev.cards[homeAbbr] ?? { yellow: 0, red: 0 };
             const ac = ev.cards[awayAbbr] ?? { yellow: 0, red: 0 };
             const hfp = ev.fairPlay[homeAbbr] ?? 0;
@@ -226,19 +235,20 @@ export class LiveIngestService {
   private findEvent(
     events: EspnEvent[],
     m: {
-      externalId: string | null;
+      externalIds: Prisma.JsonValue | null;
       kickoffAt: Date;
-      homeTeam: { shortName: string; espnAbbr: string | null } | null;
-      awayTeam: { shortName: string; espnAbbr: string | null } | null;
+      homeTeam: { shortName: string; externalIds: Prisma.JsonValue | null } | null;
+      awayTeam: { shortName: string; externalIds: Prisma.JsonValue | null } | null;
     },
   ): EspnEvent | undefined {
-    if (m.externalId) {
-      const byId = events.find((e) => e.id === m.externalId);
+    const extId = espnExternalId(m.externalIds);
+    if (extId) {
+      const byId = events.find((e) => e.id === extId);
       if (byId) return byId;
     }
-    // Match by ESPN abbreviation (espnAbbr), not the localizable shortName.
-    const home = m.homeTeam?.espnAbbr ?? m.homeTeam?.shortName;
-    const away = m.awayTeam?.espnAbbr ?? m.awayTeam?.shortName;
+    // Match by ESPN abbreviation (espn code), not the localizable shortName.
+    const home = espnCode(m.homeTeam?.externalIds) ?? m.homeTeam?.shortName;
+    const away = espnCode(m.awayTeam?.externalIds) ?? m.awayTeam?.shortName;
     if (!home || !away) return undefined;
     const pairMatches = events.filter(
       (e) => e.abbrs.includes(home) && e.abbrs.includes(away),

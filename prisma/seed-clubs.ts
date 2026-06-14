@@ -191,7 +191,9 @@ async function run(): Promise<void> {
     }
     await pool([...byId.values()], 5, async (t) => {
       try {
-        const existing = await prisma.team.findUnique({ where: { espnId: t.id } });
+        const existing = await prisma.team.findFirst({
+          where: { externalIds: { path: ['espn', 'id'], equals: t.id } },
+        });
         let logoUrl = existing?.logoUrl ?? null;
         let logoDarkUrl = existing?.logoDarkUrl ?? null;
         const def = pickLogo(t.logos, false);
@@ -208,7 +210,6 @@ async function run(): Promise<void> {
         const data = {
           name: t.displayName,
           shortName: sigla,
-          espnAbbr: sigla, // ESPN abbreviation = robot match key (clubs keep their sigla)
           type: TeamType.CLUB,
           country,
           color: t.color ?? null,
@@ -216,11 +217,20 @@ async function run(): Promise<void> {
           logoUrl,
           logoDarkUrl,
         };
+        // External refs: espn.id (stable seed key) + espn.code (robot match key).
+        // Spread any existing refs first so another provider (e.g. ge) survives.
+        const externalIds = {
+          ...((existing?.externalIds as Record<string, unknown>) ?? {}),
+          espn: { id: t.id, code: sigla },
+        };
         if (existing) {
-          await prisma.team.update({ where: { espnId: t.id }, data });
+          await prisma.team.update({
+            where: { id: existing.id },
+            data: { ...data, externalIds },
+          });
           updated++;
         } else {
-          await prisma.team.create({ data: { ...data, espnId: t.id } });
+          await prisma.team.create({ data: { ...data, externalIds } });
           created++;
         }
       } catch (e) {
