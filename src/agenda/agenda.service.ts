@@ -94,12 +94,22 @@ export class AgendaService {
       take: 500,
     });
 
-    // Group by BRT calendar day, preserving the ordered traversal.
+    // Group by BRT calendar day, preserving the ordered traversal. POSTPONED games
+    // carry a placeholder (past) date with no real kickoff yet, so they'd otherwise
+    // sort to the very top of an ascending list — collect them into a trailing
+    // "a definir" bucket instead (the front renders that day label as "A definir").
     const byDay = new Map<string, AgendaDay>();
+    const postponed: AgendaDay['matches'] = [];
     for (const m of matches) {
+      if (m.status === 'POSTPONED') {
+        postponed.push(m);
+        continue;
+      }
       const date = brtDay(m.kickoffAt);
       (byDay.get(date) ?? byDay.set(date, { date, matches: [] }).get(date)!).matches.push(m);
     }
-    return { scope, days: [...byDay.values()] };
+    const days = [...byDay.values()];
+    if (postponed.length) days.push({ date: 'postponed', matches: postponed });
+    return { scope, days };
   }
 }
