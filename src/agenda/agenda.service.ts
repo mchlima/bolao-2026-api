@@ -82,10 +82,13 @@ export class AgendaService {
           // off before midnight BRT — e.g. a late game running past 00:00 — so a
           // kickoff>=today filter would wrongly drop the one match happening right
           // now), plus postponed games (placeholder past date, no real date yet).
+          // Postponed carry a placeholder PAST date, so under an ascending `limit`
+          // they'd sort to the top and eat the result set — only include them in
+          // the full (unlimited) agenda.
           where.OR = [
             { kickoffAt: { gte: todayStart } },
             { status: 'LIVE' },
-            { status: 'POSTPONED' },
+            ...(query.limit ? [] : [{ status: 'POSTPONED' as const }]),
           ];
           break;
         case 'all':
@@ -94,11 +97,12 @@ export class AgendaService {
     }
 
     const desc = scope === 'past';
+    const take = Math.min(query.limit ? Number(query.limit) || 500 : 500, 500);
     const matches = await this.prisma.match.findMany({
       where,
       include: AGENDA_INCLUDE,
       orderBy: [{ kickoffAt: desc ? 'desc' : 'asc' }],
-      take: 500,
+      take,
     });
 
     // Group by BRT calendar day, preserving the ordered traversal. POSTPONED games

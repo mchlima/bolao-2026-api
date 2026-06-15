@@ -30,4 +30,11 @@ export class AgendaQueryDto {
   @IsOptional()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'to deve ser YYYY-MM-DD' })
   to?: string;
+
+  // Cap the number of matches returned (1–500). Lets light consumers (e.g. the
+  // home "próximos jogos" strip, which shows ~6) ask for just the next few
+  // instead of the whole upcoming list. Parsed in the service.
+  @IsOptional()
+  @Matches(/^\d{1,3}$/, { message: 'limit deve ser um número (1-500)' })
+  limit?: string;
 }
