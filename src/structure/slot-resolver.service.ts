@@ -2,7 +2,17 @@ import { Injectable, Logger } from '@nestjs/common';
 import { MatchStatus, TieResolution } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StandingsService } from './standings.service';
+import { StandingsTeam } from './standings.types';
 import { WC2026_THIRDS_TABLE } from './data/wc2026-thirds-table';
+
+// A tie's projected occupants (provisional): the teams that WOULD fill the slots
+// given the current standings / live results. Only the parts not yet officially
+// resolved are meaningful to surface as "projection".
+export interface TieProjection {
+  home: StandingsTeam | null;
+  away: StandingsTeam | null;
+  winner: StandingsTeam | null;
+}
 
 // Typed feeder stored in Tie.homeSource / Tie.awaySource (see SlotSourceType).
 // BEST_RANKED.winnerGroup = the group letter of the WINNER this third faces (the
@@ -225,6 +235,158 @@ export class SlotResolverService {
 
     const grp = stage.groups.find((g) => g.groupName === thirdLetter);
     return grp?.rows[2]?.team.id ?? null;
+  }
+
+  /**
+   * Read-only PROJECTION of the knockout bracket from the CURRENT standings:
+   * fills each unresolved slot with the team that WOULD occupy it right now
+   * (current group position / current best third) and propagates a tie's
+   * provisional leader (current aggregate of a tie with real teams being played)
+   * into the next round. Never writes — real slots stay TBD until a group
+   * finishes. Returns tieId → projected {home, away, winner} teams; the caller
+   * surfaces only the parts not yet officially resolved (so they read as
+   * "provável"). A slot is only projected once its group/stage has ≥1 played
+   * match (no meaningless all-zero alphabetical projection).
+   */
+  async projectBracket(seasonId: string): Promise<Map<string, TieProjection>> {
+    const stages = await this.standings.seasonStandings(seasonId);
+    const teamById = new Map<string, StandingsTeam>();
+    const groupRank = new Map<string, string[]>(); // groupId → team ids by current position
+    const groupHasData = new Map<string, boolean>();
+    const stageHasData = new Map<string, boolean>();
+    for (const st of stages) {
+      let stData = false;
+      for (const g of st.groups) {
+        groupRank.set(g.groupId, g.rows.map((r) => r.team.id));
+        const has = g.rows.some((r) => r.played > 0);
+        groupHasData.set(g.groupId, has);
+        if (has) stData = true;
+        for (const r of g.rows) teamById.set(r.team.id, r.team);
+      }
+      stageHasData.set(st.stageId, stData);
+    }
+    const stageById = new Map(stages.map((s) => [s.stageId, s]));
+
+    const bestThird = (stageId: string, winnerGroup?: string): string | null => {
+      if (!winnerGroup || !stageHasData.get(stageId)) return null;
+      const st = stageById.get(stageId);
+      if (!st) return null;
+      const thirds: ThirdSeed[] = st.groups
+        .map((g) => ({ letter: g.groupName, row: g.rows[2] }))
+        .filter((t): t is { letter: string; row: NonNullable<typeof t.row> } => !!t.row)
+        .map((t) => ({
+          letter: t.letter,
+          points: t.row.points,
+          goalDiff: t.row.goalDiff,
+          goalsFor: t.row.goalsFor,
+          fairPlay: t.row.fairPlay,
+          name: t.row.team.name,
+        }));
+      const letter = bestThirdLetter(thirds, winnerGroup);
+      if (!letter) return null;
+      return st.groups.find((g) => g.groupName === letter)?.rows[2]?.team.id ?? null;
+    };
+
+    const koStages = await this.prisma.stage.findMany({
+      where: { seasonId, format: 'KNOCKOUT' },
+      orderBy: { order: 'asc' },
+      include: {
+        rounds: {
+          orderBy: { order: 'asc' },
+          include: {
+            ties: {
+              orderBy: { order: 'asc' },
+              select: {
+                id: true,
+                homeTeamId: true,
+                awayTeamId: true,
+                winnerTeamId: true,
+                homeSource: true,
+                awaySource: true,
+                matches: {
+                  select: { status: true, homeScore: true, awayScore: true, homeTeamId: true, awayTeamId: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // id-level cascade (rounds processed in order so MATCH_WINNER feeders can
+    // read earlier rounds' projected winners).
+    const ids = new Map<string, { home: string | null; away: string | null; winner: string | null }>();
+    const projectSource = (src: SlotSource | null): string | null => {
+      if (!src) return null;
+      switch (src.type) {
+        case 'GROUP_POSITION':
+          return groupHasData.get(src.groupId)
+            ? (groupRank.get(src.groupId)?.[src.position - 1] ?? null)
+            : null;
+        case 'BEST_RANKED':
+          return bestThird(src.stageId, src.winnerGroup);
+        case 'MATCH_WINNER':
+          return ids.get(src.tieId)?.winner ?? null;
+        case 'MATCH_LOSER': {
+          const p = ids.get(src.tieId);
+          if (!p?.winner || !p.home || !p.away) return null;
+          return p.winner === p.home ? p.away : p.home;
+        }
+      }
+    };
+
+    for (const stage of koStages) {
+      for (const round of stage.rounds) {
+        for (const tie of round.ties) {
+          const home = tie.homeTeamId ?? projectSource(tie.homeSource as unknown as SlotSource | null);
+          const away = tie.awayTeamId ?? projectSource(tie.awaySource as unknown as SlotSource | null);
+          let winner = tie.winnerTeamId ?? null;
+          // Provisional leader: only for a tie with REAL teams currently playing.
+          if (!winner && tie.homeTeamId && tie.awayTeamId) {
+            winner = this.provisionalLeader(tie.homeTeamId, tie.awayTeamId, tie.matches);
+          }
+          ids.set(tie.id, { home, away, winner });
+        }
+      }
+    }
+
+    const out = new Map<string, TieProjection>();
+    for (const [tieId, p] of ids) {
+      out.set(tieId, {
+        home: p.home ? (teamById.get(p.home) ?? null) : null,
+        away: p.away ? (teamById.get(p.away) ?? null) : null,
+        winner: p.winner ? (teamById.get(p.winner) ?? null) : null,
+      });
+    }
+    return out;
+  }
+
+  /** Current-aggregate leader of a tie with real teams (counts LIVE + FINISHED
+   *  legs); null when level or nothing played. Powers the provisional winner. */
+  private provisionalLeader(
+    home: string,
+    away: string,
+    legs: { status: MatchStatus; homeScore: number; awayScore: number; homeTeamId: string | null; awayTeamId: string | null }[],
+  ): string | null {
+    let aggHome = 0;
+    let aggAway = 0;
+    let counted = 0;
+    for (const leg of legs) {
+      if (leg.status !== MatchStatus.LIVE && leg.status !== MatchStatus.FINISHED) continue;
+      if (leg.homeTeamId === home) {
+        aggHome += leg.homeScore;
+        aggAway += leg.awayScore;
+        counted++;
+      } else if (leg.homeTeamId === away) {
+        aggHome += leg.awayScore;
+        aggAway += leg.homeScore;
+        counted++;
+      }
+    }
+    if (!counted) return null;
+    if (aggHome > aggAway) return home;
+    if (aggAway > aggHome) return away;
+    return null;
   }
 
   private computeAggregate(

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StageStandings } from './standings.types';
 import { StandingsService } from './standings.service';
+import { SlotResolverService } from './slot-resolver.service';
 
 const TEAM_SELECT = {
   id: true,
@@ -16,6 +17,7 @@ export class StructureService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly standings: StandingsService,
+    private readonly slotResolver: SlotResolverService,
   ) {}
 
   /** Full season structure: stages → groups (+teams) and rounds. For admin + viz. */
@@ -113,6 +115,9 @@ export class StructureService {
       },
     });
 
+    // Provisional projection of unresolved slots from the current standings.
+    const proj = await this.slotResolver.projectBracket(seasonId);
+
     return stages.map((stage) => ({
       stageId: stage.id,
       stageName: stage.name,
@@ -121,20 +126,27 @@ export class StructureService {
         roundId: round.id,
         name: round.name,
         legs: round.legs,
-        ties: round.ties.map((tie) => ({
-          id: tie.id,
-          order: tie.order,
-          home: tie.homeTeam,
-          away: tie.awayTeam,
-          homeSourceLabel: tie.homeSourceLabel,
-          awaySourceLabel: tie.awaySourceLabel,
-          aggregateHome: tie.aggregateHome,
-          aggregateAway: tie.aggregateAway,
-          winnerTeamId: tie.winnerTeamId,
-          winner: tie.winnerTeam,
-          resolution: tie.resolution,
-          legs: tie.matches,
-        })),
+        ties: round.ties.map((tie) => {
+          const p = proj.get(tie.id);
+          return {
+            id: tie.id,
+            order: tie.order,
+            home: tie.homeTeam,
+            away: tie.awayTeam,
+            homeSourceLabel: tie.homeSourceLabel,
+            awaySourceLabel: tie.awaySourceLabel,
+            aggregateHome: tie.aggregateHome,
+            aggregateAway: tie.aggregateAway,
+            winnerTeamId: tie.winnerTeamId,
+            winner: tie.winnerTeam,
+            resolution: tie.resolution,
+            legs: tie.matches,
+            // Provisional occupants — only where not yet officially resolved.
+            projectedHome: tie.homeTeam ? null : (p?.home ?? null),
+            projectedAway: tie.awayTeam ? null : (p?.away ?? null),
+            projectedWinner: tie.winnerTeamId ? null : (p?.winner ?? null),
+          };
+        }),
       })),
     }));
   }
