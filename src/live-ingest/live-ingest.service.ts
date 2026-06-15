@@ -61,6 +61,9 @@ const TICK_CRON = '*/15 * * * * *';
 export class LiveIngestService {
   private readonly logger = new Logger(LiveIngestService.name);
   private running = false;
+  // Consecutive failed ticks — used to throttle the warning during a DB/ESPN
+  // outage (otherwise a multi-minute blip floods the log every 15s).
+  private failStreak = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -77,8 +80,18 @@ export class LiveIngestService {
     this.running = true;
     try {
       await this.run();
+      if (this.failStreak > 0) {
+        this.logger.log(`recovered after ${this.failStreak} failed tick(s)`);
+        this.failStreak = 0;
+      }
     } catch (e) {
-      this.logger.warn(`tick failed: ${(e as Error).message}`);
+      this.failStreak++;
+      // Log the first failure and then only every 20th (~5 min) — first line
+      // of the message, no stack, so an outage doesn't flood the log.
+      if (this.failStreak === 1 || this.failStreak % 20 === 0) {
+        const msg = (e as Error).message.split('\n')[0];
+        this.logger.warn(`tick failed (${this.failStreak}x): ${msg}`);
+      }
     } finally {
       this.running = false;
     }
