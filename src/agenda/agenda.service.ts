@@ -78,8 +78,15 @@ export class AgendaService {
           where.status = 'FINISHED';
           break;
         case 'upcoming':
-          // From today onward, plus postponed games (placeholder past date, no real date yet).
-          where.OR = [{ kickoffAt: { gte: todayStart } }, { status: 'POSTPONED' }];
+          // From today onward, plus any match still LIVE now (it may have kicked
+          // off before midnight BRT — e.g. a late game running past 00:00 — so a
+          // kickoff>=today filter would wrongly drop the one match happening right
+          // now), plus postponed games (placeholder past date, no real date yet).
+          where.OR = [
+            { kickoffAt: { gte: todayStart } },
+            { status: 'LIVE' },
+            { status: 'POSTPONED' },
+          ];
           break;
         case 'all':
           break;
