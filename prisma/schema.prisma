@@ -164,7 +164,8 @@ model Competition {
   type           CompetitionType
   country        String? // null for international/continental competitions
   confederation  String? // "FIFA", "UEFA", "CONMEBOL", "CBF"...
-  logoUrl        String?
+  logoUrl        String? // light/default variant
+  logoUrlDark    String? // dark-background variant (shown in the dark theme)
   // External provider refs in one JSON blob, e.g.
   // { "espn": { "slug": "bra.1" }, "ge": { "championshipId": "<uuid>", "phase": "<slug>" } }.
   // espn.slug is the league the live robot polls. (Replaces espnLeagueSlug.)
