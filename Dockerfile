@@ -19,7 +19,17 @@ RUN npm prune --omit=dev
 
 # ─────────────── Stage 2: runtime ───────────────
 FROM node:22-slim AS runtime
-RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+# openssl: Prisma. postgresql-client-17: the daily BackupService runs pg_dump,
+# which must match the v17 server — Debian's default client is v15, so pull v17
+# from the PostgreSQL APT repo (PGDG).
+RUN apt-get update -y && apt-get install -y openssl curl ca-certificates \
+  && install -d /usr/share/postgresql-common/pgdg \
+  && curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+       https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+  && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+       > /etc/apt/sources.list.d/pgdg.list \
+  && apt-get update -y && apt-get install -y postgresql-client-17 \
+  && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production
 WORKDIR /app
 
