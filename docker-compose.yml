@@ -1,5 +1,41 @@
-# Bolão 2026 API — VPS deployment (Postgres is external: Supabase).
+# Bolão 2026 API — VPS deployment.
+# Postgres is self-hosted on this VPS (4GB RAM / 2 vCPU) as the `db` service,
+# reachable only on the internal compose network (never exposed to the host).
 services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${LOCAL_DB_PASSWORD:?set LOCAL_DB_PASSWORD in .env}
+      POSTGRES_DB: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # internal only — no host port, not reachable from the internet
+    expose:
+      - "5432"
+    # Tuned for a shared 4GB box (API capped at 1g, Nginx + OS need headroom).
+    command:
+      - postgres
+      - -c
+      - shared_buffers=384MB
+      - -c
+      - effective_cache_size=1GB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - max_connections=50
+    mem_limit: 1300m
+    mem_reservation: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   api:
     build: .
     image: bolao-2026-api:latest
@@ -9,12 +45,17 @@ services:
     ports:
       # internal:host — Nginx on the host proxies to this port
       - "127.0.0.1:3000:3000"
-    # 2GB VPS: cap the container so it doesn't starve Nginx
     mem_limit: 1g
     mem_reservation: 512m
+    depends_on:
+      db:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 40s
+
+volumes:
+  pgdata:
