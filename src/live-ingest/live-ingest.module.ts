@@ -8,5 +8,6 @@ import { StructureModule } from '../structure/structure.module';
 @Module({
   imports: [StructureModule],
   providers: [EspnService, LiveIngestService],
+  exports: [EspnService],
 })
 export class LiveIngestModule {}
