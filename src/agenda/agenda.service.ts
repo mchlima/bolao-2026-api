@@ -42,20 +42,27 @@ const startOfBrtDay = (dayStr: string): Date => new Date(`${dayStr}T00:00:00-03:
 export class AgendaService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async agenda(query: AgendaQueryDto): Promise<{ scope: AgendaScope; days: AgendaDay[] }> {
+  async agenda(query: AgendaQueryDto): Promise<{
+    scope: AgendaScope;
+    days: AgendaDay[];
+    nav?: { prevDate: string | null; nextDate: string | null };
+  }> {
     const scope = query.scope ?? 'upcoming';
     const now = new Date();
     const todayStart = startOfBrtDay(brtDay(now));
 
     // Tournament/sport scoping. competitionId/seasonId narrow to one tournament;
-    // sportId narrows to a sport (the global agenda passes none).
-    const where: Prisma.MatchWhereInput = {
+    // sportId narrows to a sport (the global agenda passes none). Kept apart from
+    // the date window so the day-navigator adjacency (below) can reuse it.
+    const baseWhere: Prisma.MatchWhereInput = {
       homeTeamId: { not: null },
       awayTeamId: { not: null },
     };
-    if (query.seasonId) where.seasonId = query.seasonId;
-    else if (query.competitionId) where.season = { competitionId: query.competitionId };
-    else if (query.sportId) where.season = { competition: { sportId: query.sportId } };
+    if (query.seasonId) baseWhere.seasonId = query.seasonId;
+    else if (query.competitionId) baseWhere.season = { competitionId: query.competitionId };
+    else if (query.sportId) baseWhere.season = { competition: { sportId: query.sportId } };
+
+    const where: Prisma.MatchWhereInput = { ...baseWhere };
 
     // Explicit date window wins; otherwise the scope picks one.
     if (query.from || query.to) {
@@ -121,6 +128,34 @@ export class AgendaService {
     }
     const days = [...byDay.values()];
     if (postponed.length) days.push({ date: 'postponed', matches: postponed });
-    return { scope, days };
+
+    // Day-navigator adjacency: when viewing a single day (from === to), find the
+    // nearest days that actually have a real game so the UI can skip empty days
+    // instead of stepping ±1 day at a time. POSTPONED carry a placeholder date
+    // with no confirmed kickoff, so they don't count as a navigable game day.
+    let nav: { prevDate: string | null; nextDate: string | null } | undefined;
+    if (query.from && query.to && query.from === query.to) {
+      const navWhere: Prisma.MatchWhereInput = { ...baseWhere, status: { not: 'POSTPONED' } };
+      const dayStart = startOfBrtDay(query.from);
+      const nextDayStart = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+      const [nextM, prevM] = await Promise.all([
+        this.prisma.match.findFirst({
+          where: { ...navWhere, kickoffAt: { gte: nextDayStart } },
+          orderBy: { kickoffAt: 'asc' },
+          select: { kickoffAt: true },
+        }),
+        this.prisma.match.findFirst({
+          where: { ...navWhere, kickoffAt: { lt: dayStart } },
+          orderBy: { kickoffAt: 'desc' },
+          select: { kickoffAt: true },
+        }),
+      ]);
+      nav = {
+        nextDate: nextM ? brtDay(nextM.kickoffAt) : null,
+        prevDate: prevM ? brtDay(prevM.kickoffAt) : null,
+      };
+    }
+
+    return { scope, days, ...(nav ? { nav } : {}) };
   }
 }
