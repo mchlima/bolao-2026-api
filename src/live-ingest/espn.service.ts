@@ -30,6 +30,14 @@ export function playerFairPlay(yellows: number, reds: number): number {
   return yellows >= 1 ? -3 : -4;
 }
 
+// ESPN encodes a roster player's sub status as { didSub: boolean } — an OBJECT,
+// so `!!p.subbedIn` is ALWAYS true (any object is truthy), which flagged every
+// player as subbed in AND out (every starter ↓, every reserve ↑). Read .didSub
+// explicitly; tolerate a bare boolean too, in case the shape ever changes.
+function didSub(v: boolean | { didSub?: boolean } | undefined): boolean {
+  return typeof v === 'object' && v !== null ? !!v.didSub : !!v;
+}
+
 const DEFAULT_LEAGUE_SLUG = 'fifa.world';
 // `dates` is YYYYMMDD or a YYYYMMDD-YYYYMMDD range. Without it, ESPN returns only
 // its own current "day", which lags real UTC time (it stays on the last day that
@@ -310,8 +318,8 @@ export class EspnService {
           formationPlace:
             p.formationPlace != null ? Number(p.formationPlace) : null,
           starter: !!p.starter,
-          subbedIn: !!p.subbedIn,
-          subbedOut: !!p.subbedOut,
+          subbedIn: didSub(p.subbedIn),
+          subbedOut: didSub(p.subbedOut),
           yellow: stat('YC'),
           red: stat('RC'),
           photo: p.athlete?.headshot?.href ?? null,
@@ -385,8 +393,8 @@ interface EspnSummary {
       position?: { abbreviation?: string };
       formationPlace?: number | string;
       starter?: boolean;
-      subbedIn?: boolean;
-      subbedOut?: boolean;
+      subbedIn?: boolean | { didSub?: boolean };
+      subbedOut?: boolean | { didSub?: boolean };
       stats?: Array<{ abbreviation?: string; displayValue?: string }>;
     }>;
   }>;
