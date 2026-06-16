@@ -23,6 +23,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { LiveIngestModule } from './live-ingest/live-ingest.module';
 import { MatchWindowModule } from './match-window/match-window.module';
 import { SeasonRefreshModule } from './season-refresh/season-refresh.module';
+import { MatchSummaryModule } from './match-summary/match-summary.module';
 import { BackupModule } from './backup/backup.module';
 import { AgendaModule } from './agenda/agenda.module';
 import { EventsModule } from './events/events.module';
@@ -52,6 +53,7 @@ import { EventsModule } from './events/events.module';
     LiveIngestModule,
     MatchWindowModule,
     SeasonRefreshModule,
+    MatchSummaryModule,
     BackupModule,
     AgendaModule,
   ],

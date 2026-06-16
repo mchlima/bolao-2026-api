@@ -380,6 +380,7 @@ model Team {
   wonTies     Tie[]       @relation("TieWinner")
   wonSeasons  Season[]    @relation("SeasonWinner")
   players     Player[]
+  lineupEntries MatchLineupEntry[]
 
   @@unique([sportId, countryCode])
   @@index([sportId])
@@ -404,10 +405,43 @@ model Player {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  team          Team               @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  lineupEntries MatchLineupEntry[]
+  subForEntries MatchLineupEntry[] @relation("SubFor")
 
   @@index([teamId])
   @@map("players")
+}
+
+// One player's line in a match lineup, captured from the ESPN summary by the
+// robot (never proxied to the front). Starters + bench; flags drive the display
+// (subbed in/out, who they swapped with, cards). Name/photo are read off the
+// related Player, so the front consumes our DB only.
+model MatchLineupEntry {
+  id             String   @id @default(cuid())
+  matchId        String
+  teamId         String
+  playerId       String
+  isStarter      Boolean
+  jersey         String?
+  position       String? // ESPN abbreviation, e.g. "CM", "CD-R"
+  formationPlace Int?
+  subbedIn       Boolean  @default(false)
+  subbedOut      Boolean  @default(false)
+  subForPlayerId String? // swap partner (who came in / who they replaced)
+  yellow         Int      @default(0)
+  red            Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  match  Match   @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  team   Team    @relation(fields: [teamId], references: [id])
+  player Player  @relation(fields: [playerId], references: [id])
+  subFor Player? @relation("SubFor", fields: [subForPlayerId], references: [id])
+
+  @@unique([matchId, playerId])
+  @@index([matchId])
+  @@map("match_lineup_entries")
 }
 
 model Stadium {
@@ -459,6 +493,9 @@ model Match {
   awayRed         Int            @default(0)
   homeFairPlay    Int            @default(0)
   awayFairPlay    Int            @default(0)
+  // Tactical formation per side (e.g. "4-3-3"), captured from the ESPN summary.
+  homeFormation   String?
+  awayFormation   String?
   winner          MatchWinner? // explicit result orientation when FINISHED
   duration        MatchDuration? // REGULAR / EXTRA_TIME / PENALTY_SHOOTOUT
   // Free-text fallbacks kept for back-compat/display; structure now lives in the FKs above.
@@ -483,8 +520,9 @@ model Match {
   tie         Tie?         @relation(fields: [tieId], references: [id])
   homeTeam    Team?        @relation("HomeTeam", fields: [homeTeamId], references: [id])
   awayTeam    Team?        @relation("AwayTeam", fields: [awayTeamId], references: [id])
-  stadium     Stadium?     @relation(fields: [stadiumId], references: [id])
-  predictions Prediction[]
+  stadium       Stadium?           @relation(fields: [stadiumId], references: [id])
+  predictions   Prediction[]
+  lineupEntries MatchLineupEntry[]
 
   @@unique([seasonId, matchNumber]) // idempotent fixture seeding
   @@index([seasonId])

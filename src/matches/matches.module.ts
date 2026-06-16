@@ -4,12 +4,11 @@ import { MatchesController } from './matches.controller';
 import { MatchesService } from './matches.service';
 import { LineupService } from './lineup.service';
 import { StructureModule } from '../structure/structure.module';
-import { LiveIngestModule } from '../live-ingest/live-ingest.module';
 
 // StructureModule provides SlotResolverService (re-resolve brackets on result change).
-// LiveIngestModule provides EspnService (lineups from the ESPN summary feed).
+// LineupService serves the persisted lineup from our DB (no ESPN at request time).
 @Module({
-  imports: [StructureModule, LiveIngestModule],
+  imports: [StructureModule],
   controllers: [MatchesController, AdminMatchesController],
   providers: [MatchesService, LineupService],
   exports: [MatchesService],

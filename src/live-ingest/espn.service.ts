@@ -50,6 +50,8 @@ export interface EspnLineupTeam {
   players: EspnLineupPlayer[];
 }
 export interface EspnLineupPlayer {
+  espnId: string | null; // athlete id — maps to our Player.espnId
+  subForEspnId: string | null; // swap partner's athlete id
   name: string;
   jersey: string | null;
   position: string | null; // ESPN abbreviation, e.g. "CM", "CD-R"
@@ -169,16 +171,19 @@ export class EspnService {
 
     // Pair up substitutions from keyEvents: "X replaces Y" → participants[0] in,
     // participants[1] out. Key both athletes by id to their swap partner + minute.
-    const subInfo = new Map<string, { partner: string; minute: string | null }>();
+    const subInfo = new Map<
+      string,
+      { partner: string; partnerId: string | null; minute: string | null }
+    >();
     for (const e of data.keyEvents ?? []) {
       if ((e.type?.text ?? '').toLowerCase() !== 'substitution') continue;
       const inA = e.participants?.[0]?.athlete;
       const outA = e.participants?.[1]?.athlete;
       const minute = e.clock?.displayValue ?? null;
       if (inA?.id && outA?.displayName)
-        subInfo.set(String(inA.id), { partner: outA.displayName, minute });
+        subInfo.set(String(inA.id), { partner: outA.displayName, partnerId: outA.id ?? null, minute });
       if (outA?.id && inA?.displayName)
-        subInfo.set(String(outA.id), { partner: inA.displayName, minute });
+        subInfo.set(String(outA.id), { partner: inA.displayName, partnerId: inA.id ?? null, minute });
     }
 
     return data.rosters.map((r) => ({
@@ -192,6 +197,8 @@ export class EspnService {
         };
         const sub = p.athlete?.id ? subInfo.get(String(p.athlete.id)) : undefined;
         return {
+          espnId: p.athlete?.id ?? null,
+          subForEspnId: sub?.partnerId ?? null,
           name: p.athlete?.displayName ?? '',
           jersey: p.jersey ?? null,
           position,

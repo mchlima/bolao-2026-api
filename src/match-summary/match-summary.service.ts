@@ -1,0 +1,198 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
+import { PrismaService } from '../prisma/prisma.service';
+import { EventsService } from '../events/events.service';
+import { EspnLineupTeam, EspnService } from '../live-ingest/espn.service';
+import { espnCode, espnExternalId, espnSlug } from '../common/external-ids';
+
+const headshot = (espnId: string) =>
+  `https://a.espncdn.com/i/headshots/soccer/players/full/${espnId}.png`;
+
+// Lineups publish ~1h before kickoff, so open the summary window earlier than the
+// score robot's; keep ingesting until a few hours after kickoff.
+const PRE_WINDOW_MIN = 75;
+const POST_WINDOW_HOURS = 3;
+const TICK_CRON = '*/60 * * * * *'; // every 60s — gentler than the score tick
+
+/**
+ * Reads the ESPN match summary (lineups, and later events/stats) and PERSISTS it
+ * to our DB, so the front consumes our backend only — never ESPN. Runs in the
+ * pre-match → post-match window, upserts any unseen player on the fly
+ * (auto-heal), and emits the realtime signal when the lineup changed.
+ */
+@Injectable()
+export class MatchSummaryService {
+  private readonly logger = new Logger(MatchSummaryService.name);
+  private running = false;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly espn: EspnService,
+    private readonly events: EventsService,
+  ) {}
+
+  @Cron(TICK_CRON)
+  async tick(): Promise<void> {
+    if (process.env.NODE_ENV !== 'production') return;
+    if (this.running) return;
+    this.running = true;
+    try {
+      await this.run();
+    } catch (e) {
+      this.logger.warn(`summary tick failed: ${(e as Error).message.split('\n')[0]}`);
+    } finally {
+      this.running = false;
+    }
+  }
+
+  private async run(): Promise<void> {
+    const now = new Date();
+    const matches = await this.prisma.match.findMany({
+      where: {
+        homeTeamId: { not: null },
+        awayTeamId: { not: null },
+        OR: [
+          { status: 'LIVE' },
+          {
+            status: { in: ['SCHEDULED', 'FINISHED'] },
+            kickoffAt: {
+              gte: new Date(now.getTime() - POST_WINDOW_HOURS * 3_600_000),
+              lte: new Date(now.getTime() + PRE_WINDOW_MIN * 60_000),
+            },
+          },
+        ],
+      },
+      select: { id: true },
+    });
+    for (const m of matches) {
+      try {
+        await this.ingestLineup(m.id);
+      } catch (e) {
+        this.logger.warn(`lineup ingest ${m.id} failed: ${(e as Error).message.split('\n')[0]}`);
+      }
+    }
+  }
+
+  /**
+   * Fetch the ESPN summary for one match and persist its lineup + formations.
+   * Auto-heals players. Emits `match:`/`tournament:` when the lineup changed.
+   * Returns the number of entries written (0 when no lineup yet).
+   */
+  async ingestLineup(matchId: string): Promise<number> {
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      select: {
+        id: true,
+        seasonId: true,
+        homeTeamId: true,
+        awayTeamId: true,
+        kickoffAt: true,
+        externalIds: true,
+        homeTeam: { select: { externalIds: true } },
+        awayTeam: { select: { externalIds: true } },
+        season: { select: { competition: { select: { externalIds: true } } } },
+      },
+    });
+    if (!match?.homeTeamId || !match.awayTeamId) return 0;
+
+    const slug = espnSlug(match.season.competition.externalIds) ?? 'fifa.world';
+    const eventId =
+      espnExternalId(match.externalIds) ?? (await this.resolveEventId(match, slug));
+    if (!eventId) return 0;
+
+    const teams = await this.espn.fetchSummary(slug, eventId);
+    if (!teams?.length) return 0;
+
+    // Resolve every player first (auto-heal), building espnId → our playerId, so
+    // sub partners can be linked even when bench-side.
+    const idByEspn = new Map<string, string>();
+    for (const t of teams) {
+      const teamId = t.homeAway === 'away' ? match.awayTeamId : match.homeTeamId;
+      for (const p of t.players) {
+        if (!p.espnId || idByEspn.has(p.espnId)) continue;
+        idByEspn.set(p.espnId, await this.resolvePlayer(p.espnId, p.name, p.position, teamId));
+      }
+    }
+
+    // Snapshot the existing lineup to detect a change before writing.
+    const before = await this.prisma.matchLineupEntry.findMany({
+      where: { matchId },
+      select: { playerId: true, isStarter: true, subbedIn: true, subbedOut: true, yellow: true, red: true, subForPlayerId: true },
+    });
+    const sig = (rows: typeof before) =>
+      rows
+        .map((r) => `${r.playerId}:${r.isStarter}:${r.subbedIn}:${r.subbedOut}:${r.yellow}:${r.red}:${r.subForPlayerId ?? ''}`)
+        .sort()
+        .join('|');
+    const beforeSig = sig(before);
+
+    let written = 0;
+    const written_: typeof before = [];
+    for (const t of teams) {
+      const teamId = t.homeAway === 'away' ? match.awayTeamId : match.homeTeamId;
+      for (const p of t.players) {
+        const playerId = p.espnId ? idByEspn.get(p.espnId) : undefined;
+        if (!playerId) continue;
+        const subForPlayerId = p.subForEspnId ? idByEspn.get(p.subForEspnId) ?? null : null;
+        const data = {
+          teamId,
+          isStarter: p.starter,
+          jersey: p.jersey,
+          position: p.position,
+          formationPlace: p.formationPlace,
+          subbedIn: p.subbedIn,
+          subbedOut: p.subbedOut,
+          subForPlayerId,
+          yellow: p.yellow,
+          red: p.red,
+        };
+        await this.prisma.matchLineupEntry.upsert({
+          where: { matchId_playerId: { matchId, playerId } },
+          update: data,
+          create: { matchId, playerId, ...data },
+        });
+        written++;
+        written_.push({ playerId, isStarter: p.starter, subbedIn: p.subbedIn, subbedOut: p.subbedOut, yellow: p.yellow, red: p.red, subForPlayerId });
+      }
+    }
+
+    const home = teams.find((x) => x.homeAway === 'home');
+    const away = teams.find((x) => x.homeAway === 'away');
+    await this.prisma.match.update({
+      where: { id: matchId },
+      data: { homeFormation: home?.formation ?? null, awayFormation: away?.formation ?? null },
+    });
+
+    if (written && sig(written_) !== beforeSig) {
+      this.events.emit(`match:${matchId}`, `tournament:${match.seasonId}`);
+    }
+    return written;
+  }
+
+  private async resolvePlayer(
+    espnId: string,
+    name: string,
+    position: string | null,
+    teamId: string,
+  ): Promise<string> {
+    const existing = await this.prisma.player.findUnique({ where: { espnId }, select: { id: true } });
+    if (existing) return existing.id;
+    const created = await this.prisma.player.create({
+      data: { espnId, teamId, name, position, photoUrl: headshot(espnId) },
+      select: { id: true },
+    });
+    return created.id;
+  }
+
+  private async resolveEventId(
+    match: { kickoffAt: Date; homeTeam: { externalIds: unknown } | null; awayTeam: { externalIds: unknown } | null },
+    slug: string,
+  ): Promise<string | undefined> {
+    const home = espnCode(match.homeTeam?.externalIds ?? null);
+    const away = espnCode(match.awayTeam?.externalIds ?? null);
+    if (!home || !away) return undefined;
+    const day = match.kickoffAt.toISOString().slice(0, 10).replace(/-/g, '');
+    const events = await this.espn.fetchScoreboard(slug, day);
+    return events.find((e) => e.abbrs.includes(home) && e.abbrs.includes(away))?.id;
+  }
+}
