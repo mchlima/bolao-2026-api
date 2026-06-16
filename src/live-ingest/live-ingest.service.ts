@@ -43,17 +43,18 @@ const END_WINDOW_HOURS = 3; // ...until this long after kickoff
 // catch an immediate official/VAR score correction — then it goes idle again.
 const POST_FINISH_RECONCILE_MIN = 5;
 
-// Tick cadence (6-field cron, with seconds). 15s gives ~15s worst-case
+// Tick cadence (6-field cron, with seconds). 20s gives ~20s worst-case
 // detection of a kickoff or goal while staying gentle on ESPN's unofficial
-// endpoint. A tick with no match in window costs just one indexed query.
-const TICK_CRON = '*/15 * * * * *';
+// endpoint (20 divides 60 → even spacing). A tick with no match in window
+// costs just one indexed query.
+const TICK_CRON = '*/20 * * * * *';
 
 /**
- * ESPN robot: every 15s it reconciles any match inside its window (15 min before
+ * ESPN robot: every 20s it reconciles any match inside its window (15 min before
  * kickoff until 3h after) against the ESPN scoreboard — auto-advancing status
  * (SCHEDULED → LIVE → FINISHED) and live score. Because it polls through the
  * whole window (not only once a match is already LIVE), a kickoff or goal is
- * reflected within ~15s. When no match is near, a tick is a single indexed query
+ * reflected within ~20s. When no match is near, a tick is a single indexed query
  * and makes no ESPN call. Skips matches an admin took over (autoManaged=false),
  * cancelled ones, and knockout slots without both teams. ESPN is the truth.
  */

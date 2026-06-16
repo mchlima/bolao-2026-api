@@ -44,6 +44,14 @@ const scoreboardUrl = (slug: string, dates?: string): string =>
 const summaryUrl = (slug: string, eventId: string): string =>
   `https://site.api.espn.com/apis/site/v2/sports/soccer/${slug}/summary?event=${eventId}`;
 
+// The ESPN endpoints are unofficial, so be a good citizen on the shared VPS IP:
+// send a browser-like UA (a default Node/undici UA reads as a bot) and back off
+// hard when ESPN rate-limits us. Both robots fetch through EspnService, so one
+// cooldown stops ALL calls instead of hammering through a 429/block.
+const USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
+const MAX_BACKOFF_MS = 10 * 60_000; // cap the cooldown at 10 min
+
 /** A lineup row for one team, parsed from the ESPN match summary. */
 export interface EspnLineupTeam {
   homeAway: 'home' | 'away';
@@ -159,26 +167,70 @@ export function parseMatchEvents(keyEvents: EspnKeyEvent[]): EspnMatchEvent[] {
 @Injectable()
 export class EspnService {
   private readonly logger = new Logger(EspnService.name);
+  // Set when ESPN rate-limits us (429/503): skip ALL calls until this instant.
+  private blockedUntil = 0;
+  private backoffStreak = 0;
+
+  /**
+   * Shared GET → JSON for the unofficial ESPN endpoints. Sends a browser UA,
+   * honours an active cooldown (returns null WITHOUT calling out), and on a
+   * 429/503 arms an exponential backoff (respecting Retry-After when present).
+   * Returns null on any non-OK / network error so callers degrade gracefully.
+   */
+  private async getJson<T>(url: string, label: string): Promise<T | null> {
+    if (Date.now() < this.blockedUntil) return null; // cooling down — don't hit ESPN
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: { accept: 'application/json', 'user-agent': USER_AGENT },
+        signal: AbortSignal.timeout(8000),
+      });
+    } catch (e) {
+      this.logger.warn(`ESPN fetch failed (${label}): ${(e as Error).message}`);
+      return null;
+    }
+    if (res.status === 429 || res.status === 503) {
+      this.noteRateLimit(res.headers.get('retry-after'));
+      return null;
+    }
+    if (!res.ok) {
+      this.logger.warn(`ESPN responded ${res.status} for ${label}`);
+      return null;
+    }
+    if (this.backoffStreak > 0) {
+      this.logger.log(`ESPN recovered after ${this.backoffStreak} backoff(s)`);
+      this.backoffStreak = 0;
+      this.blockedUntil = 0;
+    }
+    return (await res.json()) as T;
+  }
+
+  /**
+   * Arm (or grow) the cooldown after a rate-limit. Uses Retry-After when the
+   * header is present (seconds or HTTP-date), else exponential 30s·2^n, capped.
+   */
+  private noteRateLimit(retryAfter: string | null): void {
+    let wait = 0;
+    if (retryAfter) {
+      const secs = Number(retryAfter);
+      if (Number.isFinite(secs)) wait = secs * 1000;
+      else {
+        const when = Date.parse(retryAfter);
+        if (!Number.isNaN(when)) wait = when - Date.now();
+      }
+    }
+    if (wait <= 0) wait = Math.min(MAX_BACKOFF_MS, 30_000 * 2 ** this.backoffStreak);
+    this.backoffStreak++;
+    this.blockedUntil = Date.now() + wait;
+    this.logger.warn(`ESPN rate-limited — backing off ${Math.round(wait / 1000)}s`);
+  }
 
   async fetchScoreboard(
     slug: string = DEFAULT_LEAGUE_SLUG,
     dates?: string,
   ): Promise<EspnEvent[]> {
-    let res: Response;
-    try {
-      res = await fetch(scoreboardUrl(slug, dates), {
-        headers: { accept: 'application/json' },
-        signal: AbortSignal.timeout(8000),
-      });
-    } catch (e) {
-      this.logger.warn(`ESPN fetch failed (${slug}): ${(e as Error).message}`);
-      return [];
-    }
-    if (!res.ok) {
-      this.logger.warn(`ESPN responded ${res.status} for ${slug}`);
-      return [];
-    }
-    const data = (await res.json()) as EspnScoreboard;
+    const data = await this.getJson<EspnScoreboard>(scoreboardUrl(slug, dates), slug);
+    if (!data) return [];
     const out: EspnEvent[] = [];
     for (const ev of data.events ?? []) {
       const comp = ev.competitions?.[0];
@@ -218,21 +270,8 @@ export class EspnService {
     slug: string,
     eventId: string,
   ): Promise<{ teams: EspnLineupTeam[]; events: EspnMatchEvent[]; stats: EspnTeamStats[] } | null> {
-    let res: Response;
-    try {
-      res = await fetch(summaryUrl(slug, eventId), {
-        headers: { accept: 'application/json' },
-        signal: AbortSignal.timeout(8000),
-      });
-    } catch (e) {
-      this.logger.warn(`ESPN summary failed (${slug}/${eventId}): ${(e as Error).message}`);
-      return null;
-    }
-    if (!res.ok) {
-      this.logger.warn(`ESPN summary ${res.status} for ${slug}/${eventId}`);
-      return null;
-    }
-    const data = (await res.json()) as EspnSummary;
+    const data = await this.getJson<EspnSummary>(summaryUrl(slug, eventId), `${slug}/${eventId}`);
+    if (!data) return null;
 
     // Pair up substitutions from keyEvents: "X replaces Y" → participants[0] in,
     // participants[1] out. Key both athletes by id to their swap partner + minute.
