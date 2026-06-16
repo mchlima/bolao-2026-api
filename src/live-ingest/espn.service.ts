@@ -61,6 +61,8 @@ export interface EspnLineupPlayer {
   yellow: number; // yellow cards this match
   red: number; // red cards this match
   photo: string | null; // ESPN headshot URL, when available
+  subFor: string | null; // who they swapped with (in ↔ out partner), if subbed
+  subMinute: string | null; // when the sub happened, e.g. "61'"
 }
 
 /**
@@ -164,6 +166,21 @@ export class EspnService {
     }
     const data = (await res.json()) as EspnSummary;
     if (!data.rosters?.length) return null;
+
+    // Pair up substitutions from keyEvents: "X replaces Y" → participants[0] in,
+    // participants[1] out. Key both athletes by id to their swap partner + minute.
+    const subInfo = new Map<string, { partner: string; minute: string | null }>();
+    for (const e of data.keyEvents ?? []) {
+      if ((e.type?.text ?? '').toLowerCase() !== 'substitution') continue;
+      const inA = e.participants?.[0]?.athlete;
+      const outA = e.participants?.[1]?.athlete;
+      const minute = e.clock?.displayValue ?? null;
+      if (inA?.id && outA?.displayName)
+        subInfo.set(String(inA.id), { partner: outA.displayName, minute });
+      if (outA?.id && inA?.displayName)
+        subInfo.set(String(outA.id), { partner: inA.displayName, minute });
+    }
+
     return data.rosters.map((r) => ({
       homeAway: r.homeAway === 'away' ? 'away' : 'home',
       formation: r.formation ?? null,
@@ -173,6 +190,7 @@ export class EspnService {
           const s = p.stats?.find((x) => x.abbreviation === abbr);
           return s ? Number(s.displayValue) || 0 : 0;
         };
+        const sub = p.athlete?.id ? subInfo.get(String(p.athlete.id)) : undefined;
         return {
           name: p.athlete?.displayName ?? '',
           jersey: p.jersey ?? null,
@@ -186,6 +204,8 @@ export class EspnService {
           yellow: stat('YC'),
           red: stat('RC'),
           photo: p.athlete?.headshot?.href ?? null,
+          subFor: sub?.partner ?? null,
+          subMinute: sub?.minute ?? null,
         };
       }),
     }));
@@ -244,7 +264,7 @@ interface EspnSummary {
     homeAway?: string;
     formation?: string;
     roster?: Array<{
-      athlete?: { displayName?: string; headshot?: { href?: string } };
+      athlete?: { id?: string; displayName?: string; headshot?: { href?: string } };
       jersey?: string;
       position?: { abbreviation?: string };
       formationPlace?: number | string;
@@ -253,6 +273,11 @@ interface EspnSummary {
       subbedOut?: boolean;
       stats?: Array<{ abbreviation?: string; displayValue?: string }>;
     }>;
+  }>;
+  keyEvents?: Array<{
+    type?: { text?: string };
+    clock?: { displayValue?: string };
+    participants?: Array<{ athlete?: { id?: string; displayName?: string } }>;
   }>;
 }
 interface EspnScoreboard {
