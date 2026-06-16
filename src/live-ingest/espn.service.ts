@@ -103,7 +103,7 @@ export function classifyLine(position: string | null | undefined): EspnLineupPla
 /** A timeline event (goal/card/substitution) parsed from the summary keyEvents. */
 export interface EspnMatchEvent {
   espnId: string | null;
-  type: 'GOAL' | 'OWN_GOAL' | 'PENALTY_GOAL' | 'YELLOW' | 'RED' | 'SUBSTITUTION';
+  type: 'GOAL' | 'OWN_GOAL' | 'PENALTY_GOAL' | 'YELLOW' | 'RED' | 'SUBSTITUTION' | 'PERIOD_END';
   minute: string | null;
   clockValue: number;
   period: number;
@@ -124,7 +124,21 @@ function eventType(typeText?: string, text?: string): EspnMatchEvent['type'] | n
     if (t.includes('penalty') || x.includes('penalty')) return 'PENALTY_GOAL';
     return 'GOAL';
   }
-  return null; // skip non-events (kickoff/halftime/delay markers)
+  // Referee whistle ending a period: ESPN "Halftime" (id 81), "End Regular Time"
+  // (83), and the extra-time / full-time variants. We surface these as markers;
+  // kickoff / start-2nd are skipped (the period header already marks the start),
+  // as are the "Start/End Delay" entries (injury/drinks-break noise).
+  if (
+    t === 'halftime' ||
+    t.includes('end regular time') ||
+    t.includes('full time') ||
+    t.includes('match ends') ||
+    t.includes('end of extra time') ||
+    t.includes('end of 2nd half') ||
+    t.includes('end of second half')
+  )
+    return 'PERIOD_END';
+  return null; // skip non-events (kickoff / start-2nd / delay markers)
 }
 
 /** Per-team boxscore statistics (raw name → value); curation happens on persist. */
