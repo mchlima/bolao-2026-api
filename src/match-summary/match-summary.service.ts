@@ -2,11 +2,26 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsService } from '../events/events.service';
-import { EspnMatchEvent, EspnService } from '../live-ingest/espn.service';
+import { EspnMatchEvent, EspnService, EspnTeamStats } from '../live-ingest/espn.service';
 import { espnCode, espnExternalId, espnSlug } from '../common/external-ids';
 
 const headshot = (espnId: string) =>
   `https://a.espncdn.com/i/headshots/soccer/players/full/${espnId}.png`;
+
+// Curated boxscore stats to persist (ESPN name → pt label + display order).
+const STAT_MAP: Record<string, { label: string; order: number }> = {
+  possessionPct: { label: 'Posse de bola', order: 1 },
+  totalShots: { label: 'Finalizações', order: 2 },
+  shotsOnTarget: { label: 'No alvo', order: 3 },
+  wonCorners: { label: 'Escanteios', order: 4 },
+  foulsCommitted: { label: 'Faltas', order: 5 },
+  offsides: { label: 'Impedimentos', order: 6 },
+  yellowCards: { label: 'Cartões amarelos', order: 7 },
+  redCards: { label: 'Cartões vermelhos', order: 8 },
+  saves: { label: 'Defesas', order: 9 },
+  accuratePasses: { label: 'Passes certos', order: 10 },
+  totalPasses: { label: 'Passes', order: 11 },
+};
 
 // Lineups publish ~1h before kickoff, so open the summary window earlier than the
 // score robot's; keep ingesting until a few hours after kickoff.
@@ -102,7 +117,7 @@ export class MatchSummaryService {
 
     const full = await this.espn.fetchSummaryFull(slug, eventId);
     if (!full) return 0;
-    const { teams, events } = full;
+    const { teams, events, stats } = full;
 
     // Resolve every player first (auto-heal), building espnId → our playerId, so
     // sub partners can be linked even when bench-side.
@@ -171,6 +186,7 @@ export class MatchSummaryService {
     if (hid) espnTeamMap.set(hid, match.homeTeamId);
     if (aid) espnTeamMap.set(aid, match.awayTeamId);
     const eventsChanged = await this.persistEvents(matchId, events, idByEspn, espnTeamMap);
+    await this.persistStats(matchId, stats, match.homeTeamId, match.awayTeamId);
 
     const lineupChanged = written > 0 && sig(written_) !== beforeSig;
     if (lineupChanged || eventsChanged) {
@@ -228,6 +244,27 @@ export class MatchSummaryService {
     if (inLineup) return inLineup;
     const p = await this.prisma.player.findUnique({ where: { espnId }, select: { id: true } });
     return p?.id ?? null;
+  }
+
+  /** Upsert the curated per-team boxscore stats (idempotent by match+team+key). */
+  private async persistStats(
+    matchId: string,
+    stats: EspnTeamStats[],
+    homeTeamId: string,
+    awayTeamId: string,
+  ): Promise<void> {
+    for (const t of stats) {
+      const teamId = t.homeAway === 'away' ? awayTeamId : homeTeamId;
+      for (const s of t.stats) {
+        const meta = STAT_MAP[s.key];
+        if (!meta) continue;
+        await this.prisma.matchStat.upsert({
+          where: { matchId_teamId_key: { matchId, teamId, key: s.key } },
+          update: { value: s.value, label: meta.label, order: meta.order },
+          create: { matchId, teamId, key: s.key, value: s.value, label: meta.label, order: meta.order },
+        });
+      }
+    }
   }
 
   private async resolvePlayer(

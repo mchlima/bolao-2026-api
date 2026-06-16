@@ -382,6 +382,7 @@ model Team {
   players     Player[]
   lineupEntries MatchLineupEntry[]
   events        MatchEvent[]
+  stats         MatchStat[]
 
   @@unique([sportId, countryCode])
   @@index([sportId])
@@ -441,6 +442,26 @@ model MatchEvent {
 
   @@index([matchId])
   @@map("match_events")
+}
+
+// A per-team match statistic (possession, shots, fouls…), captured from the ESPN
+// summary boxscore by the robot. Key→value, with a pt label + display order set
+// at ingest from a curated map. Powers the "Estatísticas" tab, served from our DB.
+model MatchStat {
+  id      String @id @default(cuid())
+  matchId String
+  teamId  String
+  key     String // ESPN stat name, e.g. "possessionPct"
+  value   String
+  label   String // pt-friendly label
+  order   Int    @default(0)
+
+  match Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  team  Team  @relation(fields: [teamId], references: [id])
+
+  @@unique([matchId, teamId, key])
+  @@index([matchId])
+  @@map("match_stats")
 }
 
 // One player's line in a match lineup, captured from the ESPN summary by the
@@ -554,6 +575,7 @@ model Match {
   predictions   Prediction[]
   lineupEntries MatchLineupEntry[]
   events        MatchEvent[]
+  stats         MatchStat[]
 
   @@unique([seasonId, matchNumber]) // idempotent fixture seeding
   @@index([seasonId])

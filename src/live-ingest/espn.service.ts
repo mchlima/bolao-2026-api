@@ -110,6 +110,21 @@ function eventType(typeText?: string, text?: string): EspnMatchEvent['type'] | n
   return null; // skip non-events (kickoff/halftime/delay markers)
 }
 
+/** Per-team boxscore statistics (raw name → value); curation happens on persist. */
+export interface EspnTeamStats {
+  homeAway: 'home' | 'away';
+  stats: { key: string; value: string }[];
+}
+
+export function parseTeamStats(boxscore?: EspnBoxscore): EspnTeamStats[] {
+  return (boxscore?.teams ?? []).map((t) => ({
+    homeAway: t.homeAway === 'away' ? 'away' : 'home',
+    stats: (t.statistics ?? [])
+      .filter((s) => s.name && s.displayValue != null)
+      .map((s) => ({ key: s.name!, value: String(s.displayValue) })),
+  }));
+}
+
 /** Keep only meaningful events; participants[0]=scorer/sub-in, [1]=assist/sub-off. */
 export function parseMatchEvents(keyEvents: EspnKeyEvent[]): EspnMatchEvent[] {
   const out: EspnMatchEvent[] = [];
@@ -200,7 +215,7 @@ export class EspnService {
   async fetchSummaryFull(
     slug: string,
     eventId: string,
-  ): Promise<{ teams: EspnLineupTeam[]; events: EspnMatchEvent[] } | null> {
+  ): Promise<{ teams: EspnLineupTeam[]; events: EspnMatchEvent[]; stats: EspnTeamStats[] } | null> {
     let res: Response;
     try {
       res = await fetch(summaryUrl(slug, eventId), {
@@ -266,8 +281,9 @@ export class EspnService {
     }));
 
     const events = parseMatchEvents(data.keyEvents ?? []);
-    if (!teams.length && !events.length) return null;
-    return { teams, events };
+    const stats = parseTeamStats(data.boxscore);
+    if (!teams.length && !events.length && !stats.length) return null;
+    return { teams, events, stats };
   }
 }
 
@@ -334,6 +350,13 @@ interface EspnSummary {
     }>;
   }>;
   keyEvents?: EspnKeyEvent[];
+  boxscore?: EspnBoxscore;
+}
+interface EspnBoxscore {
+  teams?: Array<{
+    homeAway?: string;
+    statistics?: Array<{ name?: string; displayValue?: string }>;
+  }>;
 }
 interface EspnKeyEvent {
   id?: string | number;

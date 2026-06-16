@@ -4,6 +4,7 @@ import { QueryMatchesDto } from './dto/query-matches.dto';
 import { MatchesService, MatchWithRelations } from './matches.service';
 import { LineupService, MatchLineup } from './lineup.service';
 import { TimelineService, MatchTimeline } from './timeline.service';
+import { StatsService, MatchStats } from './stats.service';
 
 @Controller('matches')
 export class MatchesController {
@@ -11,6 +12,7 @@ export class MatchesController {
     private readonly matches: MatchesService,
     private readonly lineups: LineupService,
     private readonly timeline: TimelineService,
+    private readonly stats: StatsService,
   ) {}
 
   @Get()
@@ -35,5 +37,11 @@ export class MatchesController {
   @Get(':id/events')
   events(@Param('id') id: string): Promise<MatchTimeline> {
     return this.timeline.forMatch(id);
+  }
+
+  // Team statistics (possession/shots/…), served from our DB.
+  @Get(':id/stats')
+  statsFor(@Param('id') id: string): Promise<MatchStats> {
+    return this.stats.forMatch(id);
   }
 }
