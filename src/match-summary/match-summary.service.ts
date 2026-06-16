@@ -218,6 +218,7 @@ export class MatchSummaryService {
       const data = {
         teamId,
         type: ev.type,
+        detail: ev.detail,
         minute: ev.minute,
         clockValue: ev.clockValue,
         period: ev.period,

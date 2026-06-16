@@ -100,10 +100,22 @@ export function classifyLine(position: string | null | undefined): EspnLineupPla
   return 'MID';
 }
 
-/** A timeline event (goal/card/substitution) parsed from the summary keyEvents. */
+/** A timeline event (goal/card/substitution/…) parsed from the summary keyEvents. */
 export interface EspnMatchEvent {
   espnId: string | null;
-  type: 'GOAL' | 'OWN_GOAL' | 'PENALTY_GOAL' | 'YELLOW' | 'RED' | 'SUBSTITUTION' | 'PERIOD_END';
+  type:
+    | 'GOAL'
+    | 'OWN_GOAL'
+    | 'PENALTY_GOAL'
+    | 'PENALTY_MISSED' // missed or saved spot-kick (detail says which)
+    | 'YELLOW'
+    | 'RED'
+    | 'SECOND_YELLOW' // second booking → sending-off
+    | 'SUBSTITUTION'
+    | 'VAR' // a VAR review/decision (detail summarises it)
+    | 'DELAY' // injury / drinks break / VAR check stoppage (detail = reason)
+    | 'PERIOD_END';
+  detail: string | null; // short pt label: goal method, VAR decision, delay reason, miss/save
   minute: string | null;
   clockValue: number;
   period: number;
@@ -113,21 +125,97 @@ export interface EspnMatchEvent {
   text: string | null;
 }
 
-function eventType(typeText?: string, text?: string): EspnMatchEvent['type'] | null {
+/** Pitch method behind a goal, from the ESPN type label ("Goal - Header" etc.). */
+function goalMethod(t: string): string | null {
+  if (t.includes('header')) return 'De cabeça';
+  if (t.includes('volley')) return 'De voleio';
+  if (t.includes('free-kick') || t.includes('free kick')) return 'De falta';
+  if (t.includes('bicycle')) return 'De bicicleta';
+  return null;
+}
+
+/** Why the match was stopped, from the Start Delay narrative. */
+function delayReason(text: string): string {
+  const x = text.toLowerCase();
+  if (x.includes('injury')) {
+    const m = text.match(/injury\s+(.+?)\s*\(/i);
+    return m ? `Atendimento médico · ${m[1].trim()}` : 'Atendimento médico';
+  }
+  if (x.includes('drinks')) return 'Pausa para água';
+  if (x.includes('cooling')) return 'Pausa técnica';
+  if (x.includes('var')) return 'Checagem do VAR';
+  return 'Jogo paralisado';
+}
+
+/** Summarise a VAR decision from its narrative (English) into a pt label. */
+function varDetail(text: string): string {
+  const x = text.toLowerCase();
+  if (x.includes('goal') && (x.includes('disallow') || x.includes('cancel') || x.includes('no goal')))
+    return 'Gol anulado';
+  if (x.includes('goal')) return 'Gol confirmado';
+  if (x.includes('penalty') && (x.includes('no ') || x.includes('overturn') || x.includes('cancel')))
+    return 'Pênalti revertido';
+  if (x.includes('penalty')) return 'Pênalti confirmado';
+  if (x.includes('red')) return 'Cartão vermelho';
+  if (x.includes('card')) return 'Cartão revisado';
+  return 'Revisão do VAR';
+}
+
+/**
+ * Classify one ESPN keyEvent into our timeline type + a short pt detail, or null
+ * to skip it. ESPN labels by free text (id varies), so we match on the type text
+ * and narrative. Order matters: VAR is tested FIRST — its text often contains
+ * "goal"/"card"/"penalty", which would otherwise invent a phantom goal/card; and
+ * "second yellow" / penalty saved-or-missed are tested before the plain
+ * yellow / goal branches.
+ */
+function classifyEvent(
+  typeText?: string,
+  text?: string,
+): { type: EspnMatchEvent['type']; detail: string | null } | null {
   const t = (typeText ?? '').toLowerCase();
   const x = (text ?? '').toLowerCase();
-  if (t.includes('substitution')) return 'SUBSTITUTION';
-  if (t.includes('yellow')) return 'YELLOW';
-  if (t.includes('red')) return 'RED';
-  if (t.includes('goal') || x.startsWith('goal')) {
-    if (t.includes('own') || x.includes('own goal')) return 'OWN_GOAL';
-    if (t.includes('penalty') || x.includes('penalty')) return 'PENALTY_GOAL';
-    return 'GOAL';
+
+  // Stoppages: ESPN emits a Start Delay (carries the reason) + an End Delay
+  // (resumption). Surface only the start, labelled by reason — the end is noise.
+  if (t.includes('start delay')) return { type: 'DELAY', detail: delayReason(text ?? '') };
+  if (t.includes('end delay') || x.startsWith('delay over')) return null;
+
+  // VAR review — before goal/card so a "Goal Disallowed" / "(Red) Card Upgrade"
+  // doesn't masquerade as a real goal or card.
+  if (t.includes('var')) return { type: 'VAR', detail: varDetail(text ?? '') };
+
+  if (t.includes('substitution')) return { type: 'SUBSTITUTION', detail: null };
+
+  // Sending-off by a second booking — before the plain yellow test.
+  if (t.includes('second yellow') || x.includes('second yellow'))
+    return { type: 'SECOND_YELLOW', detail: null };
+  // Require "red card" (not bare "red"): the word "scoRED" — e.g. in
+  // "Penalty - Scored" — contains "red" and would otherwise become a red card.
+  if (t.includes('red card')) return { type: 'RED', detail: null };
+  if (t.includes('yellow')) return { type: 'YELLOW', detail: null };
+
+  // Penalty outcomes — saved/missed BEFORE the goal branch (the text can mention
+  // "penalty"/"goal"). A bare "Penalty" (just awarded) is skipped; its outcome
+  // arrives as its own event.
+  if (t.includes('penalty')) {
+    if (t.includes('saved') || x.includes('saved') || x.includes(' save'))
+      return { type: 'PENALTY_MISSED', detail: 'Defendido' };
+    if (t.includes('miss') || x.includes('miss'))
+      return { type: 'PENALTY_MISSED', detail: 'Perdido' };
+    if (t.includes('scored') || x.startsWith('goal')) return { type: 'PENALTY_GOAL', detail: null };
+    return null;
   }
+
+  if (t.includes('goal') || x.startsWith('goal')) {
+    if (t.includes('own') || x.includes('own goal')) return { type: 'OWN_GOAL', detail: null };
+    if (x.includes('penalty')) return { type: 'PENALTY_GOAL', detail: null };
+    return { type: 'GOAL', detail: goalMethod(t) };
+  }
+
   // Referee whistle ending a period: ESPN "Halftime" (id 81), "End Regular Time"
-  // (83), and the extra-time / full-time variants. We surface these as markers;
-  // kickoff / start-2nd are skipped (the period header already marks the start),
-  // as are the "Start/End Delay" entries (injury/drinks-break noise).
+  // (83), and the extra-time / full-time variants. Kickoff / start-2nd are
+  // skipped (the period header already marks the start).
   if (
     t === 'halftime' ||
     t.includes('end regular time') ||
@@ -137,8 +225,8 @@ function eventType(typeText?: string, text?: string): EspnMatchEvent['type'] | n
     t.includes('end of 2nd half') ||
     t.includes('end of second half')
   )
-    return 'PERIOD_END';
-  return null; // skip non-events (kickoff / start-2nd / delay markers)
+    return { type: 'PERIOD_END', detail: null };
+  return null; // skip non-events (kickoff / start-2nd)
 }
 
 /** Per-team boxscore statistics (raw name → value); curation happens on persist. */
@@ -156,19 +244,22 @@ export function parseTeamStats(boxscore?: EspnBoxscore): EspnTeamStats[] {
   }));
 }
 
-/** Keep only meaningful events; participants[0]=scorer/sub-in, [1]=assist/sub-off. */
+/** Keep only meaningful events; participants[0]=scorer/sub-in, [1]=assist/sub-off.
+ * Shootout spot-kicks are pinned to period 5 so they group as a separate
+ * "Disputa de pênaltis" block, apart from any extra-time events. */
 export function parseMatchEvents(keyEvents: EspnKeyEvent[]): EspnMatchEvent[] {
   const out: EspnMatchEvent[] = [];
   for (const e of keyEvents) {
-    const type = eventType(e.type?.text, e.text);
-    if (!type) continue;
+    const c = classifyEvent(e.type?.text, e.text);
+    if (!c) continue;
     const parts = e.participants ?? [];
     out.push({
       espnId: e.id != null ? String(e.id) : null,
-      type,
+      type: c.type,
+      detail: c.detail,
       minute: e.clock?.displayValue ?? null,
       clockValue: Math.round(Number(e.clock?.value ?? 0)) || 0,
-      period: Number(e.period?.number ?? 1) || 1,
+      period: e.shootout ? 5 : Number(e.period?.number ?? 1) || 1,
       espnTeamId: e.team?.id != null ? String(e.team.id) : null,
       playerEspnId: parts[0]?.athlete?.id != null ? String(parts[0].athlete!.id) : null,
       relatedEspnId: parts[1]?.athlete?.id != null ? String(parts[1].athlete!.id) : null,
@@ -428,6 +519,7 @@ interface EspnKeyEvent {
   clock?: { value?: number; displayValue?: string };
   period?: { number?: number };
   team?: { id?: string | number };
+  shootout?: boolean;
   participants?: Array<{ athlete?: { id?: string; displayName?: string } }>;
 }
 interface EspnScoreboard {

@@ -425,14 +425,15 @@ model MatchEvent {
   id              String   @id @default(cuid())
   matchId         String
   teamId          String?
-  type            String // GOAL / OWN_GOAL / PENALTY_GOAL / YELLOW / RED / SECOND_YELLOW / SUBSTITUTION
+  type            String // GOAL / OWN_GOAL / PENALTY_GOAL / PENALTY_MISSED / YELLOW / RED / SECOND_YELLOW / SUBSTITUTION / VAR / DELAY / PERIOD_END
   minute          String? // "78'"
   clockValue      Int      @default(0) // seconds into the match, for ordering
-  period          Int      @default(1) // 1, 2, 3 (ET), 4 (pens)
+  period          Int      @default(1) // 1, 2, 3/4 (ET halves), 5 (shootout)
   playerId        String?
   relatedPlayerId String?
   espnEventId     String?  @unique // ESPN keyEvent id — idempotency
   text            String?
+  detail          String? // short pt label: goal method, VAR decision, delay reason, penalty miss/save
   createdAt       DateTime @default(now())
 
   match   Match   @relation(fields: [matchId], references: [id], onDelete: Cascade)

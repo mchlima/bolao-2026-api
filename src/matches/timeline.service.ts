@@ -2,11 +2,12 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface TimelineEvent {
-  type: string; // GOAL / OWN_GOAL / PENALTY_GOAL / YELLOW / RED / SUBSTITUTION
+  type: string; // GOAL / OWN_GOAL / PENALTY_GOAL / PENALTY_MISSED / YELLOW / RED / SECOND_YELLOW / SUBSTITUTION / VAR / DELAY / PERIOD_END
   minute: string | null;
   side: 'home' | 'away' | null;
   player: string | null; // scorer / booked / subbed-in
   related: string | null; // assist / subbed-off
+  detail: string | null; // goal method, VAR decision, delay reason, penalty miss/save
 }
 export interface TimelinePeriod {
   period: number;
@@ -19,7 +20,17 @@ export interface MatchTimeline {
 }
 
 const periodLabel = (p: number): string =>
-  p === 1 ? '1º tempo' : p === 2 ? '2º tempo' : p === 3 ? 'Prorrogação' : p === 4 ? 'Pênaltis' : `Período ${p}`;
+  p === 1
+    ? '1º tempo'
+    : p === 2
+      ? '2º tempo'
+      : p === 3
+        ? 'Prorrogação · 1º tempo'
+        : p === 4
+          ? 'Prorrogação · 2º tempo'
+          : p === 5
+            ? 'Disputa de pênaltis'
+            : `Período ${p}`;
 
 /**
  * Serves a match's event timeline from OUR database (persisted by the robot's
@@ -43,6 +54,7 @@ export class TimelineService {
             minute: true,
             period: true,
             teamId: true,
+            detail: true,
             player: { select: { name: true } },
             related: { select: { name: true } },
           },
@@ -63,6 +75,7 @@ export class TimelineService {
         side,
         player: e.player?.name ?? null,
         related: e.related?.name ?? null,
+        detail: e.detail,
       });
     }
     const periods = [...byPeriod.entries()]
