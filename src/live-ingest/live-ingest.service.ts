@@ -222,7 +222,13 @@ export class LiveIngestService {
         // chip, but only refetches the match view — not every tournament page.
         const significant = Object.keys(data).length > 0;
         if (ev.state === 'in') {
-          if (ev.clock !== m.liveClock) data.liveClock = ev.clock;
+          // Halftime still reads as state "in" (the match stays LIVE — red dot
+          // and all), but ESPN freezes displayClock at "45'+x", indistinguishable
+          // from live play. The only clean signal is STATUS_HALFTIME, so surface
+          // the break as "Intervalo" in the live clock; the front shows it in the
+          // same red live chip (uppercased → "INTERVALO").
+          const clock = /HALFTIME/i.test(ev.statusName) ? 'Intervalo' : ev.clock;
+          if (clock !== m.liveClock) data.liveClock = clock;
         } else if (m.liveClock !== null) {
           data.liveClock = null;
         }
