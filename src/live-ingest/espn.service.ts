@@ -60,6 +60,7 @@ export interface EspnLineupPlayer {
   subbedOut: boolean;
   yellow: number; // yellow cards this match
   red: number; // red cards this match
+  photo: string | null; // ESPN headshot URL, when available
 }
 
 /**
@@ -184,6 +185,7 @@ export class EspnService {
           subbedOut: !!p.subbedOut,
           yellow: stat('YC'),
           red: stat('RC'),
+          photo: p.athlete?.headshot?.href ?? null,
         };
       }),
     }));
@@ -242,7 +244,7 @@ interface EspnSummary {
     homeAway?: string;
     formation?: string;
     roster?: Array<{
-      athlete?: { displayName?: string };
+      athlete?: { displayName?: string; headshot?: { href?: string } };
       jersey?: string;
       position?: { abbreviation?: string };
       formationPlace?: number | string;
