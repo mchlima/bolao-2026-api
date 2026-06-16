@@ -379,10 +379,35 @@ model Team {
   awayTies    Tie[]       @relation("TieAway")
   wonTies     Tie[]       @relation("TieWinner")
   wonSeasons  Season[]    @relation("SeasonWinner")
+  players     Player[]
 
   @@unique([sportId, countryCode])
   @@index([sportId])
   @@map("teams")
+}
+
+// Squad catalog: every player linked to their team. Seeded from ESPN team
+// rosters (universal base + the live robot's match key) and enriched for the
+// Brasileirão from the Cartola feed (idiomatic apelido, status, photo). The live
+// robot upserts any unseen player on the fly, so the catalog never blocks
+// ingestion. Feeds the lineup / timeline / stats tabs.
+model Player {
+  id        String   @id @default(cuid())
+  teamId    String
+  name      String // display name (Cartola apelido when enriched, else ESPN displayName)
+  fullName  String?
+  position  String? // general position (e.g. "G", "CM", "Zagueiro")
+  photoUrl  String?
+  status    String? // availability, e.g. Cartola "Provável" / "Suspenso" / "Contundido"
+  espnId    String?  @unique // ESPN athlete id — robot match key + seed idempotency
+  cartolaId String?  @unique // Cartola atleta_id (Brasileirão enrichment)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([teamId])
+  @@map("players")
 }
 
 model Stadium {

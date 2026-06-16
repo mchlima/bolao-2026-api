@@ -24,7 +24,9 @@
     "prisma:studio": "prisma studio",
     "prisma:seed": "prisma db seed",
     "seed:clubs": "ts-node --project prisma/tsconfig.seed.json prisma/seed-clubs.ts",
-    "seed:national": "ts-node --project prisma/tsconfig.seed.json prisma/seed-national-teams.ts"
+    "seed:national": "ts-node --project prisma/tsconfig.seed.json prisma/seed-national-teams.ts",
+    "seed:players": "ts-node --project prisma/tsconfig.seed.json prisma/seed-players.ts",
+    "seed:players:cartola": "ts-node --project prisma/tsconfig.seed.json prisma/seed-players-cartola.ts"
   },
   "prisma": {
     "seed": "ts-node --project prisma/tsconfig.seed.json prisma/seed.ts"
