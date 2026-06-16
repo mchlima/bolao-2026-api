@@ -1,7 +1,7 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { Paginated } from '../common/pagination';
 import { QueryMatchesDto } from './dto/query-matches.dto';
-import { MatchesService, MatchWithRelations } from './matches.service';
+import { MatchesService, MatchWithRelations, MatchDetail } from './matches.service';
 import { LineupService, MatchLineup } from './lineup.service';
 import { TimelineService, MatchTimeline } from './timeline.service';
 import { StatsService, MatchStats } from './stats.service';
@@ -23,7 +23,7 @@ export class MatchesController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string): Promise<MatchWithRelations> {
+  findOne(@Param('id') id: string): Promise<MatchDetail> {
     return this.matches.findOne(id);
   }
 

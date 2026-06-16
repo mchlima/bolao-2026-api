@@ -21,6 +21,18 @@ export type MatchWithRelations = Prisma.MatchGetPayload<{
   include: typeof MATCH_INCLUDE;
 }>;
 
+// Detail payload adds availability counts so the front can decide which match
+// tabs (Escalação / Linha do tempo / Estatísticas) to show — synchronously, on
+// SSR, instead of waiting for each tab component to mount and report back.
+const MATCH_DETAIL_INCLUDE = {
+  ...MATCH_INCLUDE,
+  _count: { select: { lineupEntries: true, events: true, stats: true } },
+} satisfies Prisma.MatchInclude;
+
+export type MatchDetail = Prisma.MatchGetPayload<{
+  include: typeof MATCH_DETAIL_INCLUDE;
+}>;
+
 @Injectable()
 export class MatchesService {
   constructor(
@@ -57,10 +69,10 @@ export class MatchesService {
     return paginated(data, total, page, pageSize);
   }
 
-  async findOne(id: string): Promise<MatchWithRelations> {
+  async findOne(id: string): Promise<MatchDetail> {
     const match = await this.prisma.match.findUnique({
       where: { id },
-      include: MATCH_INCLUDE,
+      include: MATCH_DETAIL_INCLUDE,
       relationLoadStrategy: 'join',
     });
     if (!match) {
