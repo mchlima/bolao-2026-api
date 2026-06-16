@@ -83,6 +83,55 @@ export function classifyLine(position: string | null | undefined): EspnLineupPla
   return 'MID';
 }
 
+/** A timeline event (goal/card/substitution) parsed from the summary keyEvents. */
+export interface EspnMatchEvent {
+  espnId: string | null;
+  type: 'GOAL' | 'OWN_GOAL' | 'PENALTY_GOAL' | 'YELLOW' | 'RED' | 'SUBSTITUTION';
+  minute: string | null;
+  clockValue: number;
+  period: number;
+  espnTeamId: string | null;
+  playerEspnId: string | null; // scorer / booked / subbed-in
+  relatedEspnId: string | null; // assist / subbed-off
+  text: string | null;
+}
+
+function eventType(typeText?: string, text?: string): EspnMatchEvent['type'] | null {
+  const t = (typeText ?? '').toLowerCase();
+  const x = (text ?? '').toLowerCase();
+  if (t.includes('substitution')) return 'SUBSTITUTION';
+  if (t.includes('yellow')) return 'YELLOW';
+  if (t.includes('red')) return 'RED';
+  if (t.includes('goal') || x.startsWith('goal')) {
+    if (t.includes('own') || x.includes('own goal')) return 'OWN_GOAL';
+    if (t.includes('penalty') || x.includes('penalty')) return 'PENALTY_GOAL';
+    return 'GOAL';
+  }
+  return null; // skip non-events (kickoff/halftime/delay markers)
+}
+
+/** Keep only meaningful events; participants[0]=scorer/sub-in, [1]=assist/sub-off. */
+export function parseMatchEvents(keyEvents: EspnKeyEvent[]): EspnMatchEvent[] {
+  const out: EspnMatchEvent[] = [];
+  for (const e of keyEvents) {
+    const type = eventType(e.type?.text, e.text);
+    if (!type) continue;
+    const parts = e.participants ?? [];
+    out.push({
+      espnId: e.id != null ? String(e.id) : null,
+      type,
+      minute: e.clock?.displayValue ?? null,
+      clockValue: Math.round(Number(e.clock?.value ?? 0)) || 0,
+      period: Number(e.period?.number ?? 1) || 1,
+      espnTeamId: e.team?.id != null ? String(e.team.id) : null,
+      playerEspnId: parts[0]?.athlete?.id != null ? String(parts[0].athlete!.id) : null,
+      relatedEspnId: parts[1]?.athlete?.id != null ? String(parts[1].athlete!.id) : null,
+      text: e.text ?? null,
+    });
+  }
+  return out;
+}
+
 /**
  * Reads a league's scoreboard from ESPN's public (unofficial) site API. The
  * league slug (e.g. "fifa.world", "bra.1", "conmebol.libertadores") comes from
@@ -148,10 +197,10 @@ export class EspnService {
    * lineups ~1h before kickoff, so before that this is empty. Degrades to null on
    * any failure (the caller surfaces "escalação indisponível").
    */
-  async fetchSummary(
+  async fetchSummaryFull(
     slug: string,
     eventId: string,
-  ): Promise<EspnLineupTeam[] | null> {
+  ): Promise<{ teams: EspnLineupTeam[]; events: EspnMatchEvent[] } | null> {
     let res: Response;
     try {
       res = await fetch(summaryUrl(slug, eventId), {
@@ -167,7 +216,6 @@ export class EspnService {
       return null;
     }
     const data = (await res.json()) as EspnSummary;
-    if (!data.rosters?.length) return null;
 
     // Pair up substitutions from keyEvents: "X replaces Y" → participants[0] in,
     // participants[1] out. Key both athletes by id to their swap partner + minute.
@@ -186,7 +234,7 @@ export class EspnService {
         subInfo.set(String(outA.id), { partner: inA.displayName, partnerId: inA.id ?? null, minute });
     }
 
-    return data.rosters.map((r) => ({
+    const teams: EspnLineupTeam[] = (data.rosters ?? []).map((r) => ({
       homeAway: r.homeAway === 'away' ? 'away' : 'home',
       formation: r.formation ?? null,
       players: (r.roster ?? []).map((p) => {
@@ -216,6 +264,10 @@ export class EspnService {
         };
       }),
     }));
+
+    const events = parseMatchEvents(data.keyEvents ?? []);
+    if (!teams.length && !events.length) return null;
+    return { teams, events };
   }
 }
 
@@ -281,11 +333,16 @@ interface EspnSummary {
       stats?: Array<{ abbreviation?: string; displayValue?: string }>;
     }>;
   }>;
-  keyEvents?: Array<{
-    type?: { text?: string };
-    clock?: { displayValue?: string };
-    participants?: Array<{ athlete?: { id?: string; displayName?: string } }>;
-  }>;
+  keyEvents?: EspnKeyEvent[];
+}
+interface EspnKeyEvent {
+  id?: string | number;
+  type?: { text?: string };
+  text?: string;
+  clock?: { value?: number; displayValue?: string };
+  period?: { number?: number };
+  team?: { id?: string | number };
+  participants?: Array<{ athlete?: { id?: string; displayName?: string } }>;
 }
 interface EspnScoreboard {
   events?: Array<{

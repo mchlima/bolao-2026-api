@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsService } from '../events/events.service';
-import { EspnLineupTeam, EspnService } from '../live-ingest/espn.service';
+import { EspnMatchEvent, EspnService } from '../live-ingest/espn.service';
 import { espnCode, espnExternalId, espnSlug } from '../common/external-ids';
 
 const headshot = (espnId: string) =>
@@ -66,9 +66,9 @@ export class MatchSummaryService {
     });
     for (const m of matches) {
       try {
-        await this.ingestLineup(m.id);
+        await this.ingest(m.id);
       } catch (e) {
-        this.logger.warn(`lineup ingest ${m.id} failed: ${(e as Error).message.split('\n')[0]}`);
+        this.logger.warn(`summary ingest ${m.id} failed: ${(e as Error).message.split('\n')[0]}`);
       }
     }
   }
@@ -78,7 +78,7 @@ export class MatchSummaryService {
    * Auto-heals players. Emits `match:`/`tournament:` when the lineup changed.
    * Returns the number of entries written (0 when no lineup yet).
    */
-  async ingestLineup(matchId: string): Promise<number> {
+  async ingest(matchId: string): Promise<number> {
     const match = await this.prisma.match.findUnique({
       where: { id: matchId },
       select: {
@@ -100,8 +100,9 @@ export class MatchSummaryService {
       espnExternalId(match.externalIds) ?? (await this.resolveEventId(match, slug));
     if (!eventId) return 0;
 
-    const teams = await this.espn.fetchSummary(slug, eventId);
-    if (!teams?.length) return 0;
+    const full = await this.espn.fetchSummaryFull(slug, eventId);
+    if (!full) return 0;
+    const { teams, events } = full;
 
     // Resolve every player first (auto-heal), building espnId → our playerId, so
     // sub partners can be linked even when bench-side.
@@ -163,10 +164,70 @@ export class MatchSummaryService {
       data: { homeFormation: home?.formation ?? null, awayFormation: away?.formation ?? null },
     });
 
-    if (written && sig(written_) !== beforeSig) {
+    // ESPN team id → our teamId, for placing events on a side.
+    const espnTeamMap = new Map<string, string>();
+    const hid = espnExternalId(match.homeTeam?.externalIds ?? null);
+    const aid = espnExternalId(match.awayTeam?.externalIds ?? null);
+    if (hid) espnTeamMap.set(hid, match.homeTeamId);
+    if (aid) espnTeamMap.set(aid, match.awayTeamId);
+    const eventsChanged = await this.persistEvents(matchId, events, idByEspn, espnTeamMap);
+
+    const lineupChanged = written > 0 && sig(written_) !== beforeSig;
+    if (lineupChanged || eventsChanged) {
       this.events.emit(`match:${matchId}`, `tournament:${match.seasonId}`);
     }
     return written;
+  }
+
+  /** Upsert timeline events (idempotent by espnEventId). Returns true if a new
+   * event appeared (so the caller emits). Players/teams resolved to our records. */
+  private async persistEvents(
+    matchId: string,
+    events: EspnMatchEvent[],
+    idByEspn: Map<string, string>,
+    espnTeamMap: Map<string, string>,
+  ): Promise<boolean> {
+    if (!events.length) return false;
+    const before = await this.prisma.matchEvent.findMany({
+      where: { matchId },
+      select: { espnEventId: true },
+    });
+    const seen = new Set(before.map((e) => e.espnEventId));
+    let changed = false;
+    for (const ev of events) {
+      if (!ev.espnId) continue;
+      const teamId = ev.espnTeamId ? espnTeamMap.get(ev.espnTeamId) ?? null : null;
+      const playerId = await this.eventPlayer(ev.playerEspnId, idByEspn);
+      const relatedPlayerId = await this.eventPlayer(ev.relatedEspnId, idByEspn);
+      const data = {
+        teamId,
+        type: ev.type,
+        minute: ev.minute,
+        clockValue: ev.clockValue,
+        period: ev.period,
+        playerId,
+        relatedPlayerId,
+        text: ev.text,
+      };
+      await this.prisma.matchEvent.upsert({
+        where: { espnEventId: ev.espnId },
+        update: data,
+        create: { matchId, espnEventId: ev.espnId, ...data },
+      });
+      if (!seen.has(ev.espnId)) changed = true;
+    }
+    return changed;
+  }
+
+  private async eventPlayer(
+    espnId: string | null,
+    idByEspn: Map<string, string>,
+  ): Promise<string | null> {
+    if (!espnId) return null;
+    const inLineup = idByEspn.get(espnId);
+    if (inLineup) return inLineup;
+    const p = await this.prisma.player.findUnique({ where: { espnId }, select: { id: true } });
+    return p?.id ?? null;
   }
 
   private async resolvePlayer(

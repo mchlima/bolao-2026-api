@@ -381,6 +381,7 @@ model Team {
   wonSeasons  Season[]    @relation("SeasonWinner")
   players     Player[]
   lineupEntries MatchLineupEntry[]
+  events        MatchEvent[]
 
   @@unique([sportId, countryCode])
   @@index([sportId])
@@ -405,12 +406,41 @@ model Player {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  team          Team               @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  lineupEntries MatchLineupEntry[]
-  subForEntries MatchLineupEntry[] @relation("SubFor")
+  team            Team               @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  lineupEntries   MatchLineupEntry[]
+  subForEntries   MatchLineupEntry[] @relation("SubFor")
+  eventsAsPlayer  MatchEvent[]       @relation("EventPlayer")
+  eventsAsRelated MatchEvent[]       @relation("EventRelated")
 
   @@index([teamId])
   @@map("players")
+}
+
+// A timeline event of a match (goal, card, substitution…), captured from the
+// ESPN summary by the robot. Idempotent by espnEventId. Powers the "Linha do
+// tempo" tab, grouped by period. player = scorer/booked/sub-in; related =
+// assist/sub-off. Names/photos come off the linked Player.
+model MatchEvent {
+  id              String   @id @default(cuid())
+  matchId         String
+  teamId          String?
+  type            String // GOAL / OWN_GOAL / PENALTY_GOAL / YELLOW / RED / SECOND_YELLOW / SUBSTITUTION
+  minute          String? // "78'"
+  clockValue      Int      @default(0) // seconds into the match, for ordering
+  period          Int      @default(1) // 1, 2, 3 (ET), 4 (pens)
+  playerId        String?
+  relatedPlayerId String?
+  espnEventId     String?  @unique // ESPN keyEvent id — idempotency
+  text            String?
+  createdAt       DateTime @default(now())
+
+  match   Match   @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  team    Team?   @relation(fields: [teamId], references: [id])
+  player  Player? @relation("EventPlayer", fields: [playerId], references: [id])
+  related Player? @relation("EventRelated", fields: [relatedPlayerId], references: [id])
+
+  @@index([matchId])
+  @@map("match_events")
 }
 
 // One player's line in a match lineup, captured from the ESPN summary by the
@@ -523,6 +553,7 @@ model Match {
   stadium       Stadium?           @relation(fields: [stadiumId], references: [id])
   predictions   Prediction[]
   lineupEntries MatchLineupEntry[]
+  events        MatchEvent[]
 
   @@unique([seasonId, matchNumber]) // idempotent fixture seeding
   @@index([seasonId])

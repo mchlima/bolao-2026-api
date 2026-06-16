@@ -39,7 +39,7 @@ async function main() {
   let empty = 0;
   for (const [i, m] of matches.entries()) {
     try {
-      const n = await svc.ingestLineup(m.id);
+      const n = await svc.ingest(m.id);
       if (n) withLineup++;
       else empty++;
       if ((i + 1) % 10 === 0 || n) console.log(`  [${i + 1}/${matches.length}] ${m.homeTeam?.shortName}x${m.awayTeam?.shortName}: ${n} entries`);
