@@ -143,6 +143,7 @@ export class LiveIngestService {
         awayRed: true,
         homeFairPlay: true,
         awayFairPlay: true,
+        liveClock: true,
         kickoffAt: true,
         externalIds: true,
         homeTeam: { select: { shortName: true, externalIds: true } },
@@ -215,12 +216,25 @@ export class LiveIngestService {
           }
         }
 
+        // Significant = score/status/cards changed (drives the tournament-wide
+        // refetch). The live clock updates every tick while LIVE for the match
+        // chip, but only refetches the match view — not every tournament page.
+        const significant = Object.keys(data).length > 0;
+        if (ev.state === 'in') {
+          if (ev.clock !== m.liveClock) data.liveClock = ev.clock;
+        } else if (m.liveClock !== null) {
+          data.liveClock = null;
+        }
+
         if (Object.keys(data).length > 0) {
           await this.prisma.match.update({ where: { id: m.id }, data });
-          this.events.emit(`match:${m.id}`, `tournament:${m.seasonId}`);
-          this.logger.log(
-            `auto-update ${m.homeTeam!.shortName}x${m.awayTeam!.shortName}: ${JSON.stringify(data)}`,
-          );
+          this.events.emit(`match:${m.id}`);
+          if (significant) this.events.emit(`tournament:${m.seasonId}`);
+          if (significant) {
+            this.logger.log(
+              `auto-update ${m.homeTeam!.shortName}x${m.awayTeam!.shortName}: ${JSON.stringify(data)}`,
+            );
+          }
           if (data.status === 'FINISHED') finishedSeasons.add(m.seasonId);
         }
       }

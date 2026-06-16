@@ -6,6 +6,7 @@ export interface EspnEvent {
   dateIso: string;
   state: 'pre' | 'in' | 'post';
   statusName: string; // e.g. STATUS_SCHEDULED, STATUS_IN_PROGRESS, STATUS_FINAL, STATUS_POSTPONED
+  clock: string | null; // live match clock, e.g. "49'" / "90'+5'" (null when absent)
   /** Goal count keyed by team abbreviation (matches our Team.espnAbbr). */
   scores: Record<string, number>;
   abbrs: string[];
@@ -196,6 +197,7 @@ export class EspnService {
         dateIso: ev.date,
         state: ev.status?.type?.state ?? 'pre',
         statusName: ev.status?.type?.name ?? '',
+        clock: ev.status?.displayClock ?? null,
         scores,
         abbrs: Object.keys(scores),
         cards,
@@ -371,7 +373,7 @@ interface EspnScoreboard {
   events?: Array<{
     id: string | number;
     date: string;
-    status?: { type?: { state?: 'pre' | 'in' | 'post'; name?: string } };
+    status?: { type?: { state?: 'pre' | 'in' | 'post'; name?: string }; displayClock?: string };
     competitions?: Array<{
       competitors?: Array<{
         score?: string;

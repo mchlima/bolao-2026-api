@@ -547,6 +547,8 @@ model Match {
   // Tactical formation per side (e.g. "4-3-3"), captured from the ESPN summary.
   homeFormation   String?
   awayFormation   String?
+  // Live match clock from ESPN (e.g. "67'"), set while LIVE, cleared on finish.
+  liveClock       String?
   winner          MatchWinner? // explicit result orientation when FINISHED
   duration        MatchDuration? // REGULAR / EXTRA_TIME / PENALTY_SHOOTOUT
   // Free-text fallbacks kept for back-compat/display; structure now lives in the FKs above.
