@@ -58,6 +58,8 @@ export interface EspnLineupPlayer {
   starter: boolean;
   subbedIn: boolean;
   subbedOut: boolean;
+  yellow: number; // yellow cards this match
+  red: number; // red cards this match
 }
 
 /**
@@ -166,6 +168,10 @@ export class EspnService {
       formation: r.formation ?? null,
       players: (r.roster ?? []).map((p) => {
         const position = p.position?.abbreviation ?? null;
+        const stat = (abbr: string): number => {
+          const s = p.stats?.find((x) => x.abbreviation === abbr);
+          return s ? Number(s.displayValue) || 0 : 0;
+        };
         return {
           name: p.athlete?.displayName ?? '',
           jersey: p.jersey ?? null,
@@ -176,6 +182,8 @@ export class EspnService {
           starter: !!p.starter,
           subbedIn: !!p.subbedIn,
           subbedOut: !!p.subbedOut,
+          yellow: stat('YC'),
+          red: stat('RC'),
         };
       }),
     }));
@@ -241,6 +249,7 @@ interface EspnSummary {
       starter?: boolean;
       subbedIn?: boolean;
       subbedOut?: boolean;
+      stats?: Array<{ abbreviation?: string; displayValue?: string }>;
     }>;
   }>;
 }
