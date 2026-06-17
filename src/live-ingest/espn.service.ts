@@ -123,6 +123,9 @@ export interface EspnMatchEvent {
   espnTeamId: string | null;
   playerEspnId: string | null; // scorer / booked / subbed-in
   relatedEspnId: string | null; // assist / subbed-off
+  // The player's name, when the feed gives a name but no id (the commentary feed
+  // that carries VAR rulings does this) — resolved to a Player by name on persist.
+  playerName?: string | null;
   text: string | null;
 }
 
@@ -296,6 +299,7 @@ interface EspnCommentaryPlay {
   period?: { number?: number };
   clock?: { value?: number; displayValue?: string };
   team?: { displayName?: string };
+  participants?: Array<{ athlete?: { displayName?: string } }>;
 }
 
 /**
@@ -354,6 +358,7 @@ export function parseCommentaryVarEvents(
       espnTeamId: teamIdByName.get((p.team?.displayName ?? '').toLowerCase()) ?? null,
       playerEspnId: null,
       relatedEspnId: null,
+      playerName: p.participants?.[0]?.athlete?.displayName ?? null,
       text: p.text ?? null,
     });
   }

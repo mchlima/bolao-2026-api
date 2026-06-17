@@ -263,7 +263,11 @@ export class MatchSummaryService {
     for (const ev of events) {
       if (!ev.espnId) continue;
       const teamId = ev.espnTeamId ? espnTeamMap.get(ev.espnTeamId) ?? null : null;
-      const playerId = await this.eventPlayer(ev.playerEspnId, idByEspn);
+      // Prefer the athlete id; fall back to name+team for feeds that name the
+      // player without an id (the commentary feed carrying VAR rulings).
+      const playerId =
+        (await this.eventPlayer(ev.playerEspnId, idByEspn)) ??
+        (await this.playerByName(ev.playerName, teamId));
       const relatedPlayerId = await this.eventPlayer(ev.relatedEspnId, idByEspn);
       const data = {
         teamId,
@@ -284,6 +288,21 @@ export class MatchSummaryService {
       if (!seen.has(ev.espnId)) changed = true;
     }
     return changed;
+  }
+
+  /** Resolve a player by name within a team — the fallback for feeds (commentary)
+   * that give a name but no athlete id. Scoped to the team to avoid a namesake on
+   * the other side; returns null when absent (event just shows without a player). */
+  private async playerByName(
+    name: string | null | undefined,
+    teamId: string | null,
+  ): Promise<string | null> {
+    if (!name || !teamId) return null;
+    const p = await this.prisma.player.findFirst({
+      where: { name, teamId },
+      select: { id: true },
+    });
+    return p?.id ?? null;
   }
 
   private async eventPlayer(
