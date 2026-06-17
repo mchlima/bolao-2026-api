@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { clockGoesBack, EspnEvent, EspnService, LiveScoreReconciler } from './espn.service';
 import { EventsService } from '../events/events.service';
 import { SlotResolverService } from '../structure/slot-resolver.service';
+import { MonitorService } from '../monitor/monitor.service';
 import {
   espnCode,
   espnExternalId,
@@ -72,6 +73,7 @@ export class LiveIngestService {
     private readonly espn: EspnService,
     private readonly events: EventsService,
     private readonly resolver: SlotResolverService,
+    private readonly monitor: MonitorService,
   ) {}
 
   @Cron(TICK_CRON)
@@ -82,6 +84,7 @@ export class LiveIngestService {
     this.running = true;
     try {
       await this.run();
+      this.monitor.beat('live-ingest');
       if (this.failStreak > 0) {
         this.logger.log(`recovered after ${this.failStreak} failed tick(s)`);
         this.failStreak = 0;

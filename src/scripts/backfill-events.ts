@@ -17,6 +17,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EspnService } from '../live-ingest/espn.service';
 import { AlertsService } from '../alerts/alerts.service';
 import { EventsService } from '../events/events.service';
+import { MonitorService } from '../monitor/monitor.service';
 import { MatchSummaryService } from '../match-summary/match-summary.service';
 
 const PACING_MS = 1500; // gap between matches — be gentle on ESPN's public API
@@ -27,7 +28,7 @@ async function main(): Promise<void> {
   const prisma = new PrismaService();
   const espn = new EspnService(new AlertsService());
   const events = new EventsService();
-  const summary = new MatchSummaryService(prisma, espn, events);
+  const summary = new MatchSummaryService(prisma, espn, events, new MonitorService(prisma, new AlertsService()));
 
   const matches = await prisma.match.findMany({
     where: {

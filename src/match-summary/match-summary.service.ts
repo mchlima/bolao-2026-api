@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsService } from '../events/events.service';
+import { MonitorService } from '../monitor/monitor.service';
 import {
   clockGoesBack,
   EspnMatchEvent,
@@ -56,6 +57,7 @@ export class MatchSummaryService {
     private readonly prisma: PrismaService,
     private readonly espn: EspnService,
     private readonly events: EventsService,
+    private readonly monitor: MonitorService,
   ) {}
 
   @Cron(TICK_CRON)
@@ -65,6 +67,7 @@ export class MatchSummaryService {
     this.running = true;
     try {
       await this.run();
+      this.monitor.beat('match-summary');
     } catch (e) {
       this.logger.warn(`summary tick failed: ${(e as Error).message.split('\n')[0]}`);
     } finally {

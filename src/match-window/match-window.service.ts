@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsService } from '../events/events.service';
+import { MonitorService } from '../monitor/monitor.service';
 
 // Tick cadence (6-field cron, with seconds). 10s keeps the prediction lock and
 // the cross-instance sync within ~10s, costing two indexed queries per tick.
@@ -35,6 +36,7 @@ export class MatchWindowService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: EventsService,
+    private readonly monitor: MonitorService,
   ) {}
 
   @Cron(TICK_CRON)
@@ -46,6 +48,7 @@ export class MatchWindowService {
     try {
       await this.emitKickoffCloses(since, now);
       await this.emitExternalUpdates();
+      this.monitor.beat('match-window');
     } catch (e) {
       this.logger.warn(`tick failed: ${(e as Error).message}`);
     } finally {

@@ -28,6 +28,7 @@ import { BackupModule } from './backup/backup.module';
 import { AgendaModule } from './agenda/agenda.module';
 import { EventsModule } from './events/events.module';
 import { AlertsModule } from './alerts/alerts.module';
+import { MonitorModule } from './monitor/monitor.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { AlertsModule } from './alerts/alerts.module';
     ScheduleModule.forRoot(),
     PrismaModule,
     AlertsModule,
+    MonitorModule,
     EventsModule,
     ScoringModule,
     AuditModule,
