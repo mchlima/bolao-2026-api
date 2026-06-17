@@ -172,6 +172,10 @@ function varDetail(text: string): string {
       x.includes('ruled out'))
   )
     return 'Gol anulado';
+  // A review still IN PROGRESS ("VAR Checking: … Goal") is not a confirmation —
+  // its outcome lands as its own event. Test before the plain "goal" branch so it
+  // isn't mislabelled "Gol confirmado".
+  if (x.includes('check')) return 'Revisão do VAR';
   if (x.includes('goal')) return 'Gol confirmado';
   if (x.includes('penalty') && (x.includes('no ') || x.includes('overturn') || x.includes('cancel')))
     return 'Pênalti revertido';

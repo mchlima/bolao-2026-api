@@ -299,6 +299,39 @@ export class MatchSummaryService {
       });
       if (!seen.has(ev.espnId)) changed = true;
     }
+
+    // Reconcile against the authoritative keyEvents feed. ESPN walks back a goal
+    // ruled out by VAR (and the VAR notice itself) by DROPPING it from keyEvents
+    // — but our writes are upsert-only, so the stale row lingers (a disallowed
+    // goal stays green; the VAR notice duplicates the commentary one). keyEvents
+    // is the full match list (not a sliding window like commentary), so a
+    // keyEvent-sourced GOAL/VAR no longer in it was retracted → delete it. A
+    // retracted VAR also leaves its commentary twin (cmt:<id>), so drop that too.
+    // Scoped to GOAL/VAR (the only types VAR revises) to bound the blast radius,
+    // and only when we actually received keyEvents this tick.
+    const keyIds = new Set(
+      events.filter((e) => e.espnId && !e.espnId.startsWith('cmt:')).map((e) => e.espnId as string),
+    );
+    if (keyIds.size > 0) {
+      const persisted = await this.prisma.matchEvent.findMany({
+        where: {
+          matchId,
+          type: { in: ['GOAL', 'PENALTY_GOAL', 'OWN_GOAL', 'VAR'] },
+          NOT: { espnEventId: { startsWith: 'cmt:' } },
+        },
+        select: { id: true, espnEventId: true, type: true },
+      });
+      const stale = persisted.filter((e) => e.espnEventId && !keyIds.has(e.espnEventId));
+      if (stale.length > 0) {
+        const cmtTwins = stale
+          .filter((e) => e.type === 'VAR')
+          .map((e) => `cmt:${e.espnEventId}`);
+        const orphans: Prisma.MatchEventWhereInput[] = [{ id: { in: stale.map((e) => e.id) } }];
+        if (cmtTwins.length) orphans.push({ espnEventId: { in: cmtTwins } });
+        await this.prisma.matchEvent.deleteMany({ where: { matchId, OR: orphans } });
+        changed = true;
+      }
+    }
     return changed;
   }
 
