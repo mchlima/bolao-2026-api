@@ -11,6 +11,8 @@ import {
   EspnTeamStats,
   LiveScoreReconciler,
 } from '../live-ingest/espn.service';
+import { RANK, STATE_TO_STATUS } from '../live-ingest/live-ingest.service';
+import { SlotResolverService } from '../structure/slot-resolver.service';
 import { espnCode, espnExternalId, espnSlug } from '../common/external-ids';
 
 const headshot = (espnId: string) =>
@@ -58,6 +60,7 @@ export class MatchSummaryService {
     private readonly espn: EspnService,
     private readonly events: EventsService,
     private readonly monitor: MonitorService,
+    private readonly resolver: SlotResolverService,
   ) {}
 
   @Cron(TICK_CRON)
@@ -69,7 +72,9 @@ export class MatchSummaryService {
       await this.run();
       this.monitor.beat('match-summary');
     } catch (e) {
-      this.logger.warn(`summary tick failed: ${(e as Error).message.split('\n')[0]}`);
+      this.logger.warn(
+        `summary tick failed: ${(e as Error).message.split('\n')[0]}`,
+      );
     } finally {
       this.running = false;
     }
@@ -98,7 +103,9 @@ export class MatchSummaryService {
       try {
         await this.ingest(m.id);
       } catch (e) {
-        this.logger.warn(`summary ingest ${m.id} failed: ${(e as Error).message.split('\n')[0]}`);
+        this.logger.warn(
+          `summary ingest ${m.id} failed: ${(e as Error).message.split('\n')[0]}`,
+        );
       }
     }
   }
@@ -114,6 +121,7 @@ export class MatchSummaryService {
       select: {
         id: true,
         seasonId: true,
+        status: true,
         homeTeamId: true,
         awayTeamId: true,
         homeScore: true,
@@ -130,7 +138,8 @@ export class MatchSummaryService {
 
     const slug = espnSlug(match.season.competition.externalIds) ?? 'fifa.world';
     const eventId =
-      espnExternalId(match.externalIds) ?? (await this.resolveEventId(match, slug));
+      espnExternalId(match.externalIds) ??
+      (await this.resolveEventId(match, slug));
     if (!eventId) return 0;
 
     const full = await this.espn.fetchSummaryFull(slug, eventId);
@@ -141,21 +150,36 @@ export class MatchSummaryService {
     // sub partners can be linked even when bench-side.
     const idByEspn = new Map<string, string>();
     for (const t of teams) {
-      const teamId = t.homeAway === 'away' ? match.awayTeamId : match.homeTeamId;
+      const teamId =
+        t.homeAway === 'away' ? match.awayTeamId : match.homeTeamId;
       for (const p of t.players) {
         if (!p.espnId || idByEspn.has(p.espnId)) continue;
-        idByEspn.set(p.espnId, await this.resolvePlayer(p.espnId, p.name, p.position, teamId));
+        idByEspn.set(
+          p.espnId,
+          await this.resolvePlayer(p.espnId, p.name, p.position, teamId),
+        );
       }
     }
 
     // Snapshot the existing lineup to detect a change before writing.
     const before = await this.prisma.matchLineupEntry.findMany({
       where: { matchId },
-      select: { playerId: true, isStarter: true, subbedIn: true, subbedOut: true, yellow: true, red: true, subForPlayerId: true },
+      select: {
+        playerId: true,
+        isStarter: true,
+        subbedIn: true,
+        subbedOut: true,
+        yellow: true,
+        red: true,
+        subForPlayerId: true,
+      },
     });
     const sig = (rows: typeof before) =>
       rows
-        .map((r) => `${r.playerId}:${r.isStarter}:${r.subbedIn}:${r.subbedOut}:${r.yellow}:${r.red}:${r.subForPlayerId ?? ''}`)
+        .map(
+          (r) =>
+            `${r.playerId}:${r.isStarter}:${r.subbedIn}:${r.subbedOut}:${r.yellow}:${r.red}:${r.subForPlayerId ?? ''}`,
+        )
         .sort()
         .join('|');
     const beforeSig = sig(before);
@@ -163,11 +187,14 @@ export class MatchSummaryService {
     let written = 0;
     const written_: typeof before = [];
     for (const t of teams) {
-      const teamId = t.homeAway === 'away' ? match.awayTeamId : match.homeTeamId;
+      const teamId =
+        t.homeAway === 'away' ? match.awayTeamId : match.homeTeamId;
       for (const p of t.players) {
         const playerId = p.espnId ? idByEspn.get(p.espnId) : undefined;
         if (!playerId) continue;
-        const subForPlayerId = p.subForEspnId ? idByEspn.get(p.subForEspnId) ?? null : null;
+        const subForPlayerId = p.subForEspnId
+          ? (idByEspn.get(p.subForEspnId) ?? null)
+          : null;
         const data = {
           teamId,
           isStarter: p.starter,
@@ -186,7 +213,15 @@ export class MatchSummaryService {
           create: { matchId, playerId, ...data },
         });
         written++;
-        written_.push({ playerId, isStarter: p.starter, subbedIn: p.subbedIn, subbedOut: p.subbedOut, yellow: p.yellow, red: p.red, subForPlayerId });
+        written_.push({
+          playerId,
+          isStarter: p.starter,
+          subbedIn: p.subbedIn,
+          subbedOut: p.subbedOut,
+          yellow: p.yellow,
+          red: p.red,
+          subForPlayerId,
+        });
       }
     }
 
@@ -214,13 +249,44 @@ export class MatchSummaryService {
     };
     let scoreChanged = false;
     let clockChanged = false;
+    let statusChanged = false;
     if (live && (live.state === 'in' || live.state === 'post')) {
       const isFinal = live.state === 'post';
+      // This robot runs faster (10s vs 20s) and its window opens earlier (75min vs
+      // 15min) than the scoreboard one, and reads `state` from a feed that flips
+      // BEFORE the scoreboard feed at both ends of the match. The status drives the
+      // hero (the "AO VIVO" chip, the kickoff countdown) and the timeline ("Fim de
+      // jogo"), and it was lagging the narration at both ends: SCHEDULED lingered
+      // past kickoff (clock already running) and LIVE lingered past the final
+      // whistle (clock already nulled). Raise it here too, monotonically (RANK), in
+      // the SAME tick that sets/nulls the clock: the hero leaves the countdown when
+      // play starts and goes straight from "90'+x" to "Resultado final" at the end —
+      // no orphan "AO VIVO" at either boundary. The RANK guard keeps it one-way, so
+      // neither robot can undo the other; whichever sees the transition first wins.
+      const target = STATE_TO_STATUS[live.state];
+      if (RANK[target] > RANK[match.status]) {
+        matchData.status = target;
+        statusChanged = true;
+      }
       const now = Date.now();
       const hs = hid ? live.scores[hid] : undefined;
       const as = aid ? live.scores[aid] : undefined;
-      const nh = this.score.reconcile(matchId, 'home', hs, match.homeScore, isFinal, now);
-      const na = this.score.reconcile(matchId, 'away', as, match.awayScore, isFinal, now);
+      const nh = this.score.reconcile(
+        matchId,
+        'home',
+        hs,
+        match.homeScore,
+        isFinal,
+        now,
+      );
+      const na = this.score.reconcile(
+        matchId,
+        'away',
+        as,
+        match.awayScore,
+        isFinal,
+        now,
+      );
       if (nh !== undefined) {
         matchData.homeScore = nh;
         scoreChanged = true;
@@ -230,7 +296,11 @@ export class MatchSummaryService {
         scoreChanged = true;
       }
       const clock =
-        live.state === 'in' ? (/HALFTIME/i.test(live.statusName) ? 'Intervalo' : live.clock) : null;
+        live.state === 'in'
+          ? /HALFTIME/i.test(live.statusName)
+            ? 'Intervalo'
+            : live.clock
+          : null;
       if (clock !== match.liveClock && !clockGoesBack(match.liveClock, clock)) {
         matchData.liveClock = clock;
         clockChanged = true;
@@ -238,15 +308,41 @@ export class MatchSummaryService {
     }
     await this.prisma.match.update({ where: { id: matchId }, data: matchData });
 
-    const eventsChanged = await this.persistEvents(matchId, events, idByEspn, espnTeamMap);
+    const eventsChanged = await this.persistEvents(
+      matchId,
+      events,
+      idByEspn,
+      espnTeamMap,
+    );
     await this.persistStats(matchId, stats, match.homeTeamId, match.awayTeamId);
 
+    // A status flip to FINISHED may decide a group or feed a knockout slot — when
+    // this robot is the one to finish the match, it owns the re-resolution (the
+    // scoreboard robot's monotonic guard means it won't re-set FINISHED, so it
+    // wouldn't trigger it). Mirrors live-ingest.service.ts.
+    if (matchData.status === 'FINISHED') {
+      try {
+        await this.resolver.resolveSeason(match.seasonId);
+      } catch (e) {
+        this.logger.warn(
+          `slot resolve failed for season ${match.seasonId}: ${(e as Error).message}`,
+        );
+      }
+    }
+
     const lineupChanged = written > 0 && sig(written_) !== beforeSig;
-    if (lineupChanged || eventsChanged || scoreChanged || clockChanged) {
+    if (
+      lineupChanged ||
+      eventsChanged ||
+      scoreChanged ||
+      clockChanged ||
+      statusChanged
+    ) {
       const rooms = [`match:${matchId}`];
-      // Score/lineup/events drive the tournament-wide views too; a bare clock tick
-      // only needs the match view to refetch.
-      if (lineupChanged || eventsChanged || scoreChanged) rooms.push(`tournament:${match.seasonId}`);
+      // Score/lineup/events/status drive the tournament-wide views too; a bare clock
+      // tick only needs the match view to refetch.
+      if (lineupChanged || eventsChanged || scoreChanged || statusChanged)
+        rooms.push(`tournament:${match.seasonId}`);
       this.events.emit(...rooms);
     }
     return written;
@@ -272,7 +368,9 @@ export class MatchSummaryService {
     let changed = false;
     for (const ev of events) {
       if (!ev.espnId) continue;
-      const teamId = ev.espnTeamId ? espnTeamMap.get(ev.espnTeamId) ?? null : null;
+      const teamId = ev.espnTeamId
+        ? (espnTeamMap.get(ev.espnTeamId) ?? null)
+        : null;
       // Prefer the athlete id; fall back to name+team for feeds that name the
       // player without an id (the commentary feed — fouls, shots, VAR, …).
       const playerId =
@@ -310,7 +408,9 @@ export class MatchSummaryService {
     // Scoped to GOAL/VAR (the only types VAR revises) to bound the blast radius,
     // and only when we actually received keyEvents this tick.
     const keyIds = new Set(
-      events.filter((e) => e.espnId && !e.espnId.startsWith('cmt:')).map((e) => e.espnId as string),
+      events
+        .filter((e) => e.espnId && !e.espnId.startsWith('cmt:'))
+        .map((e) => e.espnId as string),
     );
     if (keyIds.size > 0) {
       const persisted = await this.prisma.matchEvent.findMany({
@@ -321,14 +421,20 @@ export class MatchSummaryService {
         },
         select: { id: true, espnEventId: true, type: true },
       });
-      const stale = persisted.filter((e) => e.espnEventId && !keyIds.has(e.espnEventId));
+      const stale = persisted.filter(
+        (e) => e.espnEventId && !keyIds.has(e.espnEventId),
+      );
       if (stale.length > 0) {
         const cmtTwins = stale
           .filter((e) => e.type === 'VAR')
           .map((e) => `cmt:${e.espnEventId}`);
-        const orphans: Prisma.MatchEventWhereInput[] = [{ id: { in: stale.map((e) => e.id) } }];
+        const orphans: Prisma.MatchEventWhereInput[] = [
+          { id: { in: stale.map((e) => e.id) } },
+        ];
         if (cmtTwins.length) orphans.push({ espnEventId: { in: cmtTwins } });
-        await this.prisma.matchEvent.deleteMany({ where: { matchId, OR: orphans } });
+        await this.prisma.matchEvent.deleteMany({
+          where: { matchId, OR: orphans },
+        });
         changed = true;
       }
     }
@@ -362,7 +468,10 @@ export class MatchSummaryService {
     if (!espnId) return null;
     const inLineup = idByEspn.get(espnId);
     if (inLineup) return inLineup;
-    const p = await this.prisma.player.findUnique({ where: { espnId }, select: { id: true } });
+    const p = await this.prisma.player.findUnique({
+      where: { espnId },
+      select: { id: true },
+    });
     return p?.id ?? null;
   }
 
@@ -381,7 +490,14 @@ export class MatchSummaryService {
         await this.prisma.matchStat.upsert({
           where: { matchId_teamId_key: { matchId, teamId, key: s.key } },
           update: { value: s.value, label: meta.label, order: meta.order },
-          create: { matchId, teamId, key: s.key, value: s.value, label: meta.label, order: meta.order },
+          create: {
+            matchId,
+            teamId,
+            key: s.key,
+            value: s.value,
+            label: meta.label,
+            order: meta.order,
+          },
         });
       }
     }
@@ -393,7 +509,10 @@ export class MatchSummaryService {
     position: string | null,
     teamId: string,
   ): Promise<string> {
-    const existing = await this.prisma.player.findUnique({ where: { espnId }, select: { id: true } });
+    const existing = await this.prisma.player.findUnique({
+      where: { espnId },
+      select: { id: true },
+    });
     if (existing) return existing.id;
     const created = await this.prisma.player.create({
       data: { espnId, teamId, name, position, photoUrl: headshot(espnId) },
@@ -403,7 +522,11 @@ export class MatchSummaryService {
   }
 
   private async resolveEventId(
-    match: { kickoffAt: Date; homeTeam: { externalIds: unknown } | null; awayTeam: { externalIds: unknown } | null },
+    match: {
+      kickoffAt: Date;
+      homeTeam: { externalIds: unknown } | null;
+      awayTeam: { externalIds: unknown } | null;
+    },
     slug: string,
   ): Promise<string | undefined> {
     const home = espnCode(match.homeTeam?.externalIds ?? null);
@@ -411,6 +534,7 @@ export class MatchSummaryService {
     if (!home || !away) return undefined;
     const day = match.kickoffAt.toISOString().slice(0, 10).replace(/-/g, '');
     const events = await this.espn.fetchScoreboard(slug, day);
-    return events.find((e) => e.abbrs.includes(home) && e.abbrs.includes(away))?.id;
+    return events.find((e) => e.abbrs.includes(home) && e.abbrs.includes(away))
+      ?.id;
   }
 }

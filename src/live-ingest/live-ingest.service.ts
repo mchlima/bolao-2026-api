@@ -2,7 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { MatchStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { clockGoesBack, EspnEvent, EspnService, LiveScoreReconciler } from './espn.service';
+import {
+  clockGoesBack,
+  EspnEvent,
+  EspnService,
+  LiveScoreReconciler,
+} from './espn.service';
 import { EventsService } from '../events/events.service';
 import { SlotResolverService } from '../structure/slot-resolver.service';
 import { MonitorService } from '../monitor/monitor.service';
@@ -31,12 +36,19 @@ function scoreboardDates(group: Array<{ kickoffAt: Date }>): string {
   return from === to ? from : `${from}-${to}`;
 }
 
-const STATE_TO_STATUS: Record<EspnEvent['state'], MatchStatus> = {
+// Shared with the summary robot (match-summary.service.ts), which also raises the
+// status from its own feed snapshot — whichever robot sees `post` first finishes
+// the match (the RANK guard keeps the transition monotonic across both).
+export const STATE_TO_STATUS: Record<EspnEvent['state'], MatchStatus> = {
   pre: 'SCHEDULED',
   in: 'LIVE',
   post: 'FINISHED',
 };
-const RANK: Record<string, number> = { SCHEDULED: 0, LIVE: 1, FINISHED: 2 };
+export const RANK: Record<string, number> = {
+  SCHEDULED: 0,
+  LIVE: 1,
+  FINISHED: 2,
+};
 
 const START_WINDOW_MIN = 15; // start polling this many minutes before kickoff
 const END_WINDOW_HOURS = 3; // ...until this long after kickoff
@@ -172,7 +184,10 @@ export class LiveIngestService {
     const finishedSeasons = new Set<string>();
 
     for (const [slug, group] of bySlug) {
-      const events = await this.espn.fetchScoreboard(slug, scoreboardDates(group));
+      const events = await this.espn.fetchScoreboard(
+        slug,
+        scoreboardDates(group),
+      );
       if (events.length === 0) continue;
 
       for (const m of group) {
@@ -197,23 +212,43 @@ export class LiveIngestService {
             // Match scores by ESPN abbreviation (espnAbbr), NOT the display
             // shortName — shortName may be localized (pt-BR). Fallback for safety.
             const home =
-              ev.scores[espnCode(m.homeTeam!.externalIds) ?? m.homeTeam!.shortName];
+              ev.scores[
+                espnCode(m.homeTeam!.externalIds) ?? m.homeTeam!.shortName
+              ];
             const away =
-              ev.scores[espnCode(m.awayTeam!.externalIds) ?? m.awayTeam!.shortName];
+              ev.scores[
+                espnCode(m.awayTeam!.externalIds) ?? m.awayTeam!.shortName
+              ];
             // The score moves up at once; a drop is confirmed by persistence
             // (LiveScoreReconciler) so a VAR annulment lowers it while a momentarily
             // stale feed can't revert a goal the summary robot already applied — the
             // flicker we'd otherwise get. A FINISHED match takes the exact value.
             const isFinal = ev.state === 'post';
             const now = Date.now();
-            const nh = this.score.reconcile(m.id, 'home', home, m.homeScore, isFinal, now);
-            const na = this.score.reconcile(m.id, 'away', away, m.awayScore, isFinal, now);
+            const nh = this.score.reconcile(
+              m.id,
+              'home',
+              home,
+              m.homeScore,
+              isFinal,
+              now,
+            );
+            const na = this.score.reconcile(
+              m.id,
+              'away',
+              away,
+              m.awayScore,
+              isFinal,
+              now,
+            );
             if (nh !== undefined) data.homeScore = nh;
             if (na !== undefined) data.awayScore = na;
 
             // Discipline (cards + fair-play) from the same feed — keyed by espn code.
-            const homeAbbr = espnCode(m.homeTeam!.externalIds) ?? m.homeTeam!.shortName;
-            const awayAbbr = espnCode(m.awayTeam!.externalIds) ?? m.awayTeam!.shortName;
+            const homeAbbr =
+              espnCode(m.homeTeam!.externalIds) ?? m.homeTeam!.shortName;
+            const awayAbbr =
+              espnCode(m.awayTeam!.externalIds) ?? m.awayTeam!.shortName;
             const hc = ev.cards[homeAbbr] ?? { yellow: 0, red: 0 };
             const ac = ev.cards[awayAbbr] ?? { yellow: 0, red: 0 };
             const hfp = ev.fairPlay[homeAbbr] ?? 0;
@@ -237,9 +272,12 @@ export class LiveIngestService {
           // from live play. The only clean signal is STATUS_HALFTIME, so surface
           // the break as "Intervalo" in the live clock; the front shows it in the
           // same red live chip (uppercased → "INTERVALO").
-          const clock = /HALFTIME/i.test(ev.statusName) ? 'Intervalo' : ev.clock;
+          const clock = /HALFTIME/i.test(ev.statusName)
+            ? 'Intervalo'
+            : ev.clock;
           // Don't let a lagging feed pull the clock backwards (see clockGoesBack).
-          if (clock !== m.liveClock && !clockGoesBack(m.liveClock, clock)) data.liveClock = clock;
+          if (clock !== m.liveClock && !clockGoesBack(m.liveClock, clock))
+            data.liveClock = clock;
         } else if (m.liveClock !== null) {
           data.liveClock = null;
         }
@@ -282,8 +320,14 @@ export class LiveIngestService {
     m: {
       externalIds: Prisma.JsonValue | null;
       kickoffAt: Date;
-      homeTeam: { shortName: string; externalIds: Prisma.JsonValue | null } | null;
-      awayTeam: { shortName: string; externalIds: Prisma.JsonValue | null } | null;
+      homeTeam: {
+        shortName: string;
+        externalIds: Prisma.JsonValue | null;
+      } | null;
+      awayTeam: {
+        shortName: string;
+        externalIds: Prisma.JsonValue | null;
+      } | null;
     },
   ): EspnEvent | undefined {
     const extId = espnExternalId(m.externalIds);

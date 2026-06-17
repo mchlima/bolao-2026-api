@@ -9,6 +9,8 @@ import { AlertsService } from '../alerts/alerts.service';
 import { EventsService } from '../events/events.service';
 import { MonitorService } from '../monitor/monitor.service';
 import { MatchSummaryService } from '../match-summary/match-summary.service';
+import { SlotResolverService } from '../structure/slot-resolver.service';
+import { StandingsService } from '../structure/standings.service';
 
 async function main(): Promise<void> {
   const matchId = process.argv[2];
@@ -21,6 +23,7 @@ async function main(): Promise<void> {
     espn,
     events,
     new MonitorService(prisma, new AlertsService()),
+    new SlotResolverService(prisma, new StandingsService(prisma)),
   );
   await summary.ingest(matchId);
   const byType = await prisma.matchEvent.groupBy({
@@ -28,7 +31,10 @@ async function main(): Promise<void> {
     where: { matchId },
     _count: { _all: true },
   });
-  console.log('eventos por tipo:', JSON.stringify(byType.map((b) => ({ type: b.type, n: b._count._all }))));
+  console.log(
+    'eventos por tipo:',
+    JSON.stringify(byType.map((b) => ({ type: b.type, n: b._count._all }))),
+  );
   await prisma.$disconnect();
 }
 

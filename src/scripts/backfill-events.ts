@@ -19,6 +19,8 @@ import { AlertsService } from '../alerts/alerts.service';
 import { EventsService } from '../events/events.service';
 import { MonitorService } from '../monitor/monitor.service';
 import { MatchSummaryService } from '../match-summary/match-summary.service';
+import { SlotResolverService } from '../structure/slot-resolver.service';
+import { StandingsService } from '../structure/standings.service';
 
 const PACING_MS = 1500; // gap between matches — be gentle on ESPN's public API
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -28,7 +30,13 @@ async function main(): Promise<void> {
   const prisma = new PrismaService();
   const espn = new EspnService(new AlertsService());
   const events = new EventsService();
-  const summary = new MatchSummaryService(prisma, espn, events, new MonitorService(prisma, new AlertsService()));
+  const summary = new MatchSummaryService(
+    prisma,
+    espn,
+    events,
+    new MonitorService(prisma, new AlertsService()),
+    new SlotResolverService(prisma, new StandingsService(prisma)),
+  );
 
   const matches = await prisma.match.findMany({
     where: {
@@ -45,7 +53,9 @@ async function main(): Promise<void> {
     },
   });
 
-  console.log(`[backfill] ${matches.length} finished match(es)${limit ? ` (limited to ${limit})` : ''}`);
+  console.log(
+    `[backfill] ${matches.length} finished match(es)${limit ? ` (limited to ${limit})` : ''}`,
+  );
   let ok = 0;
   let fail = 0;
   let withEvents = 0;
@@ -62,7 +72,9 @@ async function main(): Promise<void> {
       console.log(`[${ok + fail}/${matches.length}] ${label} → ${n} event(s)`);
     } catch (e) {
       fail++;
-      console.warn(`[${ok + fail}/${matches.length}] FAIL ${label}: ${(e as Error).message.split('\n')[0]}`);
+      console.warn(
+        `[${ok + fail}/${matches.length}] FAIL ${label}: ${(e as Error).message.split('\n')[0]}`,
+      );
     }
     await sleep(PACING_MS);
   }
