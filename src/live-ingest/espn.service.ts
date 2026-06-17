@@ -151,7 +151,14 @@ function delayReason(text: string): string {
 /** Summarise a VAR decision from its narrative (English) into a pt label. */
 function varDetail(text: string): string {
   const x = text.toLowerCase();
-  if (x.includes('goal') && (x.includes('disallow') || x.includes('cancel') || x.includes('no goal')))
+  if (
+    x.includes('goal') &&
+    (x.includes('disallow') ||
+      x.includes('cancel') ||
+      x.includes('no goal') ||
+      x.includes('overturn') ||
+      x.includes('ruled out'))
+  )
     return 'Gol anulado';
   if (x.includes('goal')) return 'Gol confirmado';
   if (x.includes('penalty') && (x.includes('no ') || x.includes('overturn') || x.includes('cancel')))
@@ -279,6 +286,78 @@ export function clockGoesBack(cur: string | null, next: string | null): boolean 
   const a = liveClockOrder(cur);
   const b = liveClockOrder(next);
   return a !== null && b !== null && b < a;
+}
+
+/** One play-by-play entry from the ESPN summary `commentary` feed. */
+interface EspnCommentaryPlay {
+  id?: string | number;
+  type?: { text?: string; type?: string };
+  text?: string;
+  period?: { number?: number };
+  clock?: { value?: number; displayValue?: string };
+  team?: { displayName?: string };
+}
+
+/**
+ * ESPN does NOT put VAR rulings in keyEvents — a disallowed goal simply never
+ * appears there (the goal is dropped, leaving no trace). They live in the
+ * play-by-play `commentary` instead: a chalked-off goal as "Deleted After Review"
+ * (type "deleted-after-review") and the formal call as "VAR - Referee decision
+ * cancelled". Pull just those into our timeline as VAR events.
+ *
+ * Commentary carries NAMES, not ids, so the team is resolved via the header's
+ * name→id map (teamIdByName, then the usual espnTeamMap on persist) and the
+ * player is left unlinked — the detail ("Gol anulado") + side carry the meaning.
+ *
+ * A deletion (e.g. 8') and its "VAR Decision: No Goal" (9') describe ONE
+ * annulment, so a "No Goal" decision is dropped when a deletion sits within ~3min
+ * of it in the same period — otherwise the timeline shows two "Gol anulado" rows.
+ * The id is namespaced ("cmt:") so it can't collide with a keyEvent id on upsert.
+ */
+export function parseCommentaryVarEvents(
+  commentary: Array<{ play?: EspnCommentaryPlay }>,
+  teamIdByName: Map<string, string>,
+): EspnMatchEvent[] {
+  const isVar = (p: EspnCommentaryPlay): boolean => {
+    const tt = (p.type?.type ?? '').toLowerCase();
+    const tx = (p.type?.text ?? '').toLowerCase();
+    return tt.includes('review') || tt.includes('var') || tt.includes('delet') || tx.includes('var');
+  };
+  const isDeletion = (p: EspnCommentaryPlay): boolean =>
+    (p.type?.type ?? '').toLowerCase().includes('delet');
+  const secs = (p: EspnCommentaryPlay): number => Math.round(Number(p.clock?.value ?? 0)) || 0;
+  const per = (p: EspnCommentaryPlay): number => Number(p.period?.number ?? 1) || 1;
+
+  const plays = commentary
+    .map((c) => c.play)
+    .filter((p): p is EspnCommentaryPlay => !!p && !!p.id && isVar(p));
+  const deletions = plays.filter(isDeletion);
+
+  const out: EspnMatchEvent[] = [];
+  for (const p of plays) {
+    const deletion = isDeletion(p);
+    const detail = deletion ? 'Gol anulado' : varDetail(p.text ?? '');
+    // Skip a "No Goal" decision that mirrors a nearby deletion (same annulment).
+    if (
+      !deletion &&
+      detail === 'Gol anulado' &&
+      deletions.some((d) => per(d) === per(p) && Math.abs(secs(d) - secs(p)) <= 180)
+    )
+      continue;
+    out.push({
+      espnId: `cmt:${p.id}`,
+      type: 'VAR',
+      detail,
+      minute: p.clock?.displayValue ?? null,
+      clockValue: secs(p),
+      period: per(p),
+      espnTeamId: teamIdByName.get((p.team?.displayName ?? '').toLowerCase()) ?? null,
+      playerEspnId: null,
+      relatedEspnId: null,
+      text: p.text ?? null,
+    });
+  }
+  return out;
 }
 
 // A confirmed downward score move must persist at least this long before it's
@@ -542,11 +621,23 @@ export class EspnService {
       }),
     }));
 
-    const events = parseMatchEvents(data.keyEvents ?? []);
-    const stats = parseTeamStats(data.boxscore);
-
     // Live score + clock from the header (same snapshot as the events above).
     const comp = data.header?.competitions?.[0];
+
+    // ESPN team displayName → id, from the header — the commentary feed (which
+    // carries VAR rulings) names the team but gives no id, so this bridges it back
+    // to the espnTeamMap used on persist.
+    const teamIdByName = new Map<string, string>();
+    for (const c of comp?.competitors ?? []) {
+      if (c.team?.id != null && c.team.displayName)
+        teamIdByName.set(c.team.displayName.toLowerCase(), String(c.team.id));
+    }
+
+    const events = [
+      ...parseMatchEvents(data.keyEvents ?? []),
+      ...parseCommentaryVarEvents(data.commentary ?? [], teamIdByName),
+    ];
+    const stats = parseTeamStats(data.boxscore);
     const live: EspnLiveState | null = comp
       ? {
           scores: Object.fromEntries(
@@ -628,10 +719,14 @@ interface EspnSummary {
     }>;
   }>;
   keyEvents?: EspnKeyEvent[];
+  commentary?: Array<{ play?: EspnCommentaryPlay }>;
   boxscore?: EspnBoxscore;
   header?: {
     competitions?: Array<{
-      competitors?: Array<{ score?: string | number; team?: { id?: string | number } }>;
+      competitors?: Array<{
+        score?: string | number;
+        team?: { id?: string | number; displayName?: string };
+      }>;
       status?: { displayClock?: string; type?: { name?: string; state?: 'pre' | 'in' | 'post' } };
     }>;
   };

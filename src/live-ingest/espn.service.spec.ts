@@ -1,4 +1,9 @@
-import { LiveScoreReconciler, parseDiscipline, playerFairPlay } from './espn.service';
+import {
+  LiveScoreReconciler,
+  parseCommentaryVarEvents,
+  parseDiscipline,
+  playerFairPlay,
+} from './espn.service';
 
 describe('playerFairPlay (FIFA fair-play points per player/match)', () => {
   it('single yellow = -1', () => {
@@ -117,5 +122,69 @@ describe('LiveScoreReconciler (VAR drop vs lagging-feed revert)', () => {
     expect(r.reconcile(M, 'home', 0, 1, false, 0)).toBeUndefined();
     expect(r.reconcile(M, 'away', 3, 2, false, 0)).toBe(3); // away up applies, home drop still pending
     expect(r.reconcile(M, 'home', 0, 1, false, CONFIRM)).toBe(0);
+  });
+});
+
+describe('parseCommentaryVarEvents (VAR rulings live in commentary, not keyEvents)', () => {
+  // Real ARG@ALG (event 760433) commentary shape: a goal chalked off + its formal call.
+  const names = new Map([['algeria', '624'], ['argentina', '202']]);
+  const deletion = {
+    play: {
+      id: '49535759',
+      type: { id: '175', text: 'Deleted After Review', type: 'deleted-after-review' },
+      text: 'GOAL OVERTURNED BY VAR: Farès Chaïbi (Algeria) scores but the goal is ruled out after a VAR review.',
+      period: { number: 1 },
+      clock: { value: 447, displayValue: "8'" },
+      team: { displayName: 'Algeria' },
+    },
+  };
+  const noGoalDecision = {
+    play: {
+      id: '49535801',
+      type: { text: 'VAR - Referee decision cancelled', type: 'var-referee-decision-cancelled' },
+      text: 'VAR Decision: No Goal Argentina 0-0 Algeria.',
+      period: { number: 1 },
+      clock: { value: 510, displayValue: "9'" },
+      team: { displayName: 'Algeria' },
+    },
+  };
+  const foul = {
+    play: { id: '1', type: { text: 'Foul', type: 'foul' }, text: 'Foul by someone.', clock: { value: 600 } },
+  };
+
+  it('extracts a disallowed goal as a VAR event on the right side', () => {
+    const out = parseCommentaryVarEvents([foul, deletion], names);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      espnId: 'cmt:49535759',
+      type: 'VAR',
+      detail: 'Gol anulado',
+      minute: "8'",
+      period: 1,
+      espnTeamId: '624',
+      playerEspnId: null,
+    });
+  });
+
+  it('collapses the "No Goal" decision that mirrors a nearby deletion', () => {
+    const out = parseCommentaryVarEvents([deletion, noGoalDecision], names);
+    expect(out).toHaveLength(1); // not two "Gol anulado" rows
+    expect(out[0].espnId).toBe('cmt:49535759'); // the deletion is kept
+  });
+
+  it('keeps a standalone "No Goal" decision when no deletion accompanies it', () => {
+    const out = parseCommentaryVarEvents([noGoalDecision], names);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ detail: 'Gol anulado', espnId: 'cmt:49535801' });
+  });
+
+  it('leaves the team unresolved when the name is unknown', () => {
+    const out = parseCommentaryVarEvents([deletion], new Map());
+    expect(out[0].espnTeamId).toBeNull();
+  });
+
+  it('ignores non-VAR commentary and plays without an id', () => {
+    expect(parseCommentaryVarEvents([foul], names)).toHaveLength(0);
+    expect(parseCommentaryVarEvents([{ play: { ...deletion.play, id: undefined } }], names)).toHaveLength(0);
   });
 });
