@@ -34,10 +34,11 @@ const STAT_MAP: Record<string, { label: string; order: number }> = {
 // score robot's; keep ingesting until a few hours after kickoff.
 const PRE_WINDOW_MIN = 75;
 const POST_WINDOW_HOURS = 3;
-const TICK_CRON = '*/20 * * * * *'; // every 20s — matches the score tick so the
-// narration keeps pace with the score (heavier than the score fetch: lineup +
-// events + commentary + stats per in-window match; the shared ESPN backoff guards
-// against rate-limiting).
+const TICK_CRON = '*/10 * * * * *'; // every 10s — fastest narration. Heaviest
+// fetch (lineup + events + commentary + stats per in-window match): on a busy
+// fixture day this risks ESPN rate-limiting; the shared backoff pauses all calls
+// and now fires a webhook alert (AlertsService), and the `running` guard skips a
+// tick if the previous one is still working, so it can't pile up.
 
 /**
  * Reads the ESPN match summary (lineups, and later events/stats) and PERSISTS it
