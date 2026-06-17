@@ -259,16 +259,21 @@ export class MatchSummaryService {
       select: { espnEventId: true },
     });
     const seen = new Set(before.map((e) => e.espnEventId));
+    // Cache name→playerId within this ingest — a player commits many fouls/shots,
+    // so this avoids re-querying the same name dozens of times per tick.
+    const nameCache = new Map<string, string | null>();
     let changed = false;
     for (const ev of events) {
       if (!ev.espnId) continue;
       const teamId = ev.espnTeamId ? espnTeamMap.get(ev.espnTeamId) ?? null : null;
       // Prefer the athlete id; fall back to name+team for feeds that name the
-      // player without an id (the commentary feed carrying VAR rulings).
+      // player without an id (the commentary feed — fouls, shots, VAR, …).
       const playerId =
         (await this.eventPlayer(ev.playerEspnId, idByEspn)) ??
-        (await this.playerByName(ev.playerName, teamId));
-      const relatedPlayerId = await this.eventPlayer(ev.relatedEspnId, idByEspn);
+        (await this.playerByName(ev.playerName, teamId, nameCache));
+      const relatedPlayerId =
+        (await this.eventPlayer(ev.relatedEspnId, idByEspn)) ??
+        (await this.playerByName(ev.relatedName, teamId, nameCache));
       const data = {
         teamId,
         type: ev.type,
@@ -296,13 +301,18 @@ export class MatchSummaryService {
   private async playerByName(
     name: string | null | undefined,
     teamId: string | null,
+    cache?: Map<string, string | null>,
   ): Promise<string | null> {
     if (!name || !teamId) return null;
+    const key = `${teamId}:${name}`;
+    if (cache?.has(key)) return cache.get(key)!;
     const p = await this.prisma.player.findFirst({
       where: { name, teamId },
       select: { id: true },
     });
-    return p?.id ?? null;
+    const id = p?.id ?? null;
+    cache?.set(key, id);
+    return id;
   }
 
   private async eventPlayer(

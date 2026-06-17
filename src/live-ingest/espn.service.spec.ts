@@ -1,5 +1,6 @@
 import {
   LiveScoreReconciler,
+  parseCommentaryActionEvents,
   parseCommentaryVarEvents,
   parseDiscipline,
   playerFairPlay,
@@ -186,5 +187,48 @@ describe('parseCommentaryVarEvents (VAR rulings live in commentary, not keyEvent
   it('ignores non-VAR commentary and plays without an id', () => {
     expect(parseCommentaryVarEvents([foul], names)).toHaveLength(0);
     expect(parseCommentaryVarEvents([{ play: { ...deletion.play, id: undefined } }], names)).toHaveLength(0);
+  });
+});
+
+describe('parseCommentaryActionEvents (fouls/offsides/corners/shots from commentary)', () => {
+  const names = new Map([['algeria', '624'], ['argentina', '202']]);
+  const play = (id, type, text, team, parts = [], clock = { value: 600, displayValue: "10'" }) => ({
+    play: { id, type: { type }, text, period: { number: 1 }, clock, team: { displayName: team },
+      participants: parts.map((n) => ({ athlete: { displayName: n } })) },
+  });
+
+  it('keeps the offender half of a foul, drops the "wins a free kick" twin', () => {
+    const offender = play('1', 'foul', 'Foul by Enzo Fernández (Argentina).', 'Argentina', ['Enzo Fernández', 'Anis Hadj Moussa']);
+    const victim = play('2', 'foul', 'Anis Hadj Moussa (Algeria) wins a free kick.', 'Argentina', ['Enzo Fernández', 'Anis Hadj Moussa']);
+    const out = parseCommentaryActionEvents([offender, victim], names);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ type: 'FOUL', playerName: 'Enzo Fernández', espnTeamId: '202' });
+  });
+
+  it('reads the caught player from the offside text (not the participants)', () => {
+    const o = play('3', 'offside', 'Offside, Argentina. Lautaro Martínez is caught offside.', 'Argentina', ['Facundo Medina']);
+    const out = parseCommentaryActionEvents([o], names);
+    expect(out[0]).toMatchObject({ type: 'OFFSIDE', playerName: 'Lautaro Martínez', espnTeamId: '202' });
+  });
+
+  it('maps a corner to the team, with no player', () => {
+    const c = play('4', 'corner-awarded', 'Corner, Algeria. Conceded by Emiliano Martínez.', 'Algeria');
+    const out = parseCommentaryActionEvents([c], names);
+    expect(out[0]).toMatchObject({ type: 'CORNER', espnTeamId: '624', playerName: null });
+  });
+
+  it('maps shots with shooter + assist', () => {
+    const off = play('5', 'shot-off-target', 'Attempt missed. Lionel Messi (Argentina) ...', 'Argentina', ['Lionel Messi']);
+    const on = play('6', 'shot-on-target', 'Attempt saved. Lautaro ... Assisted by Lionel Messi', 'Argentina', ['Lautaro Martínez', 'Lionel Messi']);
+    const blk = play('7', 'shot-blocked', 'Attempt blocked. Anis ... Assisted by Rafik', 'Algeria', ['Anis Hadj Moussa', 'Rafik Belghali']);
+    const out = parseCommentaryActionEvents([off, on, blk], names);
+    expect(out.map((e) => e.type)).toEqual(['SHOT_OFF_TARGET', 'SHOT_ON_TARGET', 'SHOT_BLOCKED']);
+    expect(out[1]).toMatchObject({ playerName: 'Lautaro Martínez', relatedName: 'Lionel Messi' });
+  });
+
+  it('ignores plays it does not classify and plays without an id', () => {
+    const kickoff = play('8', 'kickoff', 'First Half begins.', 'Argentina');
+    const noId = play(undefined, 'foul', 'Foul by X.', 'Argentina', ['X']);
+    expect(parseCommentaryActionEvents([kickoff, noId], names)).toHaveLength(0);
   });
 });

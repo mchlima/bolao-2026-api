@@ -108,11 +108,18 @@ export interface EspnMatchEvent {
     | 'OWN_GOAL'
     | 'PENALTY_GOAL'
     | 'PENALTY_MISSED' // missed or saved spot-kick (detail says which)
+    | 'PENALTY_AWARDED' // a penalty was given (outcome arrives as its own event)
     | 'YELLOW'
     | 'RED'
     | 'SECOND_YELLOW' // second booking → sending-off
     | 'SUBSTITUTION'
     | 'VAR' // a VAR review/decision (detail summarises it)
+    | 'FOUL'
+    | 'OFFSIDE'
+    | 'CORNER'
+    | 'SHOT_ON_TARGET' // on goal (scored separately) — saved/hit the target
+    | 'SHOT_OFF_TARGET'
+    | 'SHOT_BLOCKED'
     | 'DELAY' // injury / drinks break / VAR check stoppage (detail = reason)
     | 'PERIOD_START' // kickoff of a resumed half — seeds the period header, no row
     | 'PERIOD_END';
@@ -123,9 +130,10 @@ export interface EspnMatchEvent {
   espnTeamId: string | null;
   playerEspnId: string | null; // scorer / booked / subbed-in
   relatedEspnId: string | null; // assist / subbed-off
-  // The player's name, when the feed gives a name but no id (the commentary feed
-  // that carries VAR rulings does this) — resolved to a Player by name on persist.
+  // Player/assist NAMES, when the feed gives a name but no id (the commentary feed
+  // does this) — resolved to a Player by name on persist.
   playerName?: string | null;
+  relatedName?: string | null;
   text: string | null;
 }
 
@@ -359,6 +367,84 @@ export function parseCommentaryVarEvents(
       playerEspnId: null,
       relatedEspnId: null,
       playerName: p.participants?.[0]?.athlete?.displayName ?? null,
+      text: p.text ?? null,
+    });
+  }
+  return out;
+}
+
+/**
+ * Extract the running play-by-play — fouls, offsides, corners, shots, a penalty
+ * award — from the commentary feed into typed timeline events (the "Narração").
+ * The keyEvents/VAR parsers cover goals/cards/subs/VAR; this fills in the rest.
+ *
+ * Language-free by design: we persist the TYPE + structured player/team only,
+ * never the English narration, so the front renders each locale's label. Names
+ * come without ids (resolved by name on persist); team via the header name→id map.
+ *
+ * Quirks: a foul emits a PAIR — "Foul by X" (the offender) and "Y wins a free
+ * kick" (the victim) — so only the offender half is kept. An offside's
+ * participants name the passer, not the caught player, so that name is read from
+ * the text instead. A corner names no player. Ids are namespaced ("cmt:").
+ */
+export function parseCommentaryActionEvents(
+  commentary: Array<{ play?: EspnCommentaryPlay }>,
+  teamIdByName: Map<string, string>,
+): EspnMatchEvent[] {
+  const secs = (p: EspnCommentaryPlay): number => Math.round(Number(p.clock?.value ?? 0)) || 0;
+  const per = (p: EspnCommentaryPlay): number => Number(p.period?.number ?? 1) || 1;
+  const part = (p: EspnCommentaryPlay, i: number): string | null =>
+    p.participants?.[i]?.athlete?.displayName ?? null;
+
+  const out: EspnMatchEvent[] = [];
+  for (const c of commentary) {
+    const p = c.play;
+    if (!p?.id) continue;
+    const tt = (p.type?.type ?? '').toLowerCase();
+    const tx = (p.text ?? '').toLowerCase();
+
+    let type: EspnMatchEvent['type'];
+    let playerName: string | null = null;
+    let relatedName: string | null = null;
+    if (tt === 'foul') {
+      if (!tx.startsWith('foul by')) continue; // drop the "wins a free kick" twin
+      type = 'FOUL';
+      playerName = part(p, 0);
+    } else if (tt === 'offside') {
+      type = 'OFFSIDE';
+      playerName = p.text?.match(/\.\s*(.+?)\s+is caught offside/i)?.[1]?.trim() ?? null;
+    } else if (tt === 'corner-awarded') {
+      type = 'CORNER';
+    } else if (tt === 'shot-off-target') {
+      type = 'SHOT_OFF_TARGET';
+      playerName = part(p, 0);
+      relatedName = part(p, 1);
+    } else if (tt === 'shot-on-target') {
+      type = 'SHOT_ON_TARGET';
+      playerName = part(p, 0);
+      relatedName = part(p, 1);
+    } else if (tt === 'shot-blocked') {
+      type = 'SHOT_BLOCKED';
+      playerName = part(p, 0);
+      relatedName = part(p, 1);
+    } else if (tt.includes('penalty') && !tt.includes('miss') && !tt.includes('saved')) {
+      type = 'PENALTY_AWARDED';
+    } else {
+      continue;
+    }
+
+    out.push({
+      espnId: `cmt:${p.id}`,
+      type,
+      detail: null,
+      minute: p.clock?.displayValue ?? null,
+      clockValue: secs(p),
+      period: per(p),
+      espnTeamId: teamIdByName.get((p.team?.displayName ?? '').toLowerCase()) ?? null,
+      playerEspnId: null,
+      relatedEspnId: null,
+      playerName,
+      relatedName,
       text: p.text ?? null,
     });
   }
@@ -641,6 +727,7 @@ export class EspnService {
     const events = [
       ...parseMatchEvents(data.keyEvents ?? []),
       ...parseCommentaryVarEvents(data.commentary ?? [], teamIdByName),
+      ...parseCommentaryActionEvents(data.commentary ?? [], teamIdByName),
     ];
     const stats = parseTeamStats(data.boxscore);
     const live: EspnLiveState | null = comp
