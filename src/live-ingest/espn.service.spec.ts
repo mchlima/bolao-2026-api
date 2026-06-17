@@ -233,6 +233,30 @@ describe('parseCommentaryActionEvents (fouls/offsides/corners/shots from comment
     expect(out[1]).toMatchObject({ playerName: 'Lautaro Martínez', relatedName: 'Lionel Messi' });
   });
 
+  it('turns an on-target shot saved by the keeper into a SAVE (keeper in detail)', () => {
+    const s = play(
+      '9',
+      'shot-on-target',
+      'Attempt saved. Lautaro Martínez (Argentina) right footed shot is saved in the centre of the goal by Anthony (Algeria). Assisted by Lionel Messi.',
+      'Argentina',
+      ['Lautaro Martínez', 'Lionel Messi'],
+    );
+    const out = parseCommentaryActionEvents([s], names);
+    expect(out[0]).toMatchObject({ type: 'SAVE', playerName: 'Lautaro Martínez', detail: 'Anthony' });
+  });
+
+  it('captures a shot that hit the woodwork', () => {
+    const w = play(
+      '10',
+      'shot-hit-woodwork',
+      'Lionel Messi (Argentina) hits the right post with a left footed shot from outside the box.',
+      'Argentina',
+      ['Lionel Messi'],
+    );
+    const out = parseCommentaryActionEvents([w], names);
+    expect(out[0]).toMatchObject({ type: 'WOODWORK', playerName: 'Lionel Messi', detail: 'Na trave' });
+  });
+
   it('ignores plays it does not classify and plays without an id', () => {
     const kickoff = play('8', 'kickoff', 'First Half begins.', 'Argentina');
     const noId = play(undefined, 'foul', 'Foul by X.', 'Argentina', ['X']);

@@ -121,6 +121,8 @@ export interface EspnMatchEvent {
     | 'SHOT_ON_TARGET' // on goal (scored separately) — saved/hit the target
     | 'SHOT_OFF_TARGET'
     | 'SHOT_BLOCKED'
+    | 'SAVE' // shot on target stopped by the keeper — detail = goalkeeper name
+    | 'WOODWORK' // shot that hit the post/bar (detail = which)
     | 'DELAY' // injury / drinks break / VAR check stoppage (detail = reason)
     | 'PERIOD_START' // kickoff of a resumed half — seeds the period header, no row
     | 'PERIOD_END';
@@ -183,6 +185,23 @@ function varDetail(text: string): string {
   if (x.includes('red')) return 'Cartão vermelho';
   if (x.includes('card')) return 'Cartão revisado';
   return 'Revisão do VAR';
+}
+
+/**
+ * Goalkeeper who stopped an on-target shot, from the ESPN narrative
+ * "... is saved ... by <Keeper> (<Team>) ...". Null when the text isn't a save
+ * (e.g. cleared off the line), so the caller keeps it a plain SHOT_ON_TARGET.
+ */
+function keeperFromText(text: string): string | null {
+  const m = text.match(/saved[\s\S]*?\bby\s+([^()]+?)\s*\(/i);
+  return m ? m[1].trim() || null : null;
+}
+
+/** Which woodwork was hit — "No travessão" (bar/crossbar) vs "Na trave" (post). */
+function woodworkSpot(text: string): string {
+  const x = text.toLowerCase();
+  if (x.includes('crossbar') || x.includes('the bar')) return 'No travessão';
+  return 'Na trave';
 }
 
 /**
@@ -411,6 +430,7 @@ export function parseCommentaryActionEvents(
     let type: EspnMatchEvent['type'];
     let playerName: string | null = null;
     let relatedName: string | null = null;
+    let detail: string | null = null;
     if (tt === 'foul') {
       if (!tx.startsWith('foul by')) continue; // drop the "wins a free kick" twin
       type = 'FOUL';
@@ -424,10 +444,26 @@ export function parseCommentaryActionEvents(
       type = 'SHOT_OFF_TARGET';
       playerName = part(p, 0);
       relatedName = part(p, 1);
-    } else if (tt === 'shot-on-target') {
-      type = 'SHOT_ON_TARGET';
+    } else if (tt === 'shot-hit-woodwork') {
+      // Hit the post/bar — a near-goal worth its own row.
+      type = 'WOODWORK';
       playerName = part(p, 0);
       relatedName = part(p, 1);
+      detail = woodworkSpot(p.text ?? '');
+    } else if (tt === 'shot-on-target') {
+      // An on-target shot that didn't score was stopped by the keeper: surface it
+      // as a SAVE highlighting the goalkeeper (detail), since the keeper is on the
+      // opposing team and can't resolve as a same-team `related` player.
+      const keeper = keeperFromText(p.text ?? '');
+      if (keeper) {
+        type = 'SAVE';
+        playerName = part(p, 0); // shooter
+        detail = keeper; // goalkeeper name
+      } else {
+        type = 'SHOT_ON_TARGET';
+        playerName = part(p, 0);
+        relatedName = part(p, 1);
+      }
     } else if (tt === 'shot-blocked') {
       type = 'SHOT_BLOCKED';
       playerName = part(p, 0);
@@ -441,7 +477,7 @@ export function parseCommentaryActionEvents(
     out.push({
       espnId: `cmt:${p.id}`,
       type,
-      detail: null,
+      detail,
       minute: p.clock?.displayValue ?? null,
       clockValue: secs(p),
       period: per(p),
