@@ -254,6 +254,33 @@ export function parseTeamStats(boxscore?: EspnBoxscore): EspnTeamStats[] {
   }));
 }
 
+/** Live score + clock + status read from the SAME summary snapshot as the events,
+ * so a goal and the score it produces can be applied together (the scoreboard
+ * feed the other robot polls can lag this one). Scores keyed by ESPN team id. */
+export interface EspnLiveState {
+  scores: Record<string, number>;
+  clock: string | null;
+  statusName: string;
+  state: 'pre' | 'in' | 'post' | null;
+}
+
+/** Sort weight of a live-clock string, or null for non-numeric ones ("Intervalo",
+ * empty) so transitions to/from them are never blocked (no stuck clock at a
+ * half-time / extra-time break). */
+export function liveClockOrder(clock: string | null): number | null {
+  const m = clock?.match(/(\d+)\s*'?\s*(?:\+\s*(\d+))?/);
+  return m ? Number(m[1]) * 100 + (m[2] ? Number(m[2]) : 0) : null;
+}
+
+/** While live the two ESPN feeds can disagree for a moment; never let the shown
+ * clock jump backwards. Blocks ONLY a numeric→smaller-numeric move; anything
+ * involving "Intervalo"/unknown is allowed. */
+export function clockGoesBack(cur: string | null, next: string | null): boolean {
+  const a = liveClockOrder(cur);
+  const b = liveClockOrder(next);
+  return a !== null && b !== null && b < a;
+}
+
 /** Keep only meaningful events; participants[0]=scorer/sub-in, [1]=assist/sub-off.
  * Shootout spot-kicks are pinned to period 5 so they group as a separate
  * "Disputa de pênaltis" block, apart from any extra-time events. */
@@ -392,7 +419,12 @@ export class EspnService {
   async fetchSummaryFull(
     slug: string,
     eventId: string,
-  ): Promise<{ teams: EspnLineupTeam[]; events: EspnMatchEvent[]; stats: EspnTeamStats[] } | null> {
+  ): Promise<{
+    teams: EspnLineupTeam[];
+    events: EspnMatchEvent[];
+    stats: EspnTeamStats[];
+    live: EspnLiveState | null;
+  } | null> {
     const data = await this.getJson<EspnSummary>(summaryUrl(slug, eventId), `${slug}/${eventId}`);
     if (!data) return null;
 
@@ -446,8 +478,24 @@ export class EspnService {
 
     const events = parseMatchEvents(data.keyEvents ?? []);
     const stats = parseTeamStats(data.boxscore);
-    if (!teams.length && !events.length && !stats.length) return null;
-    return { teams, events, stats };
+
+    // Live score + clock from the header (same snapshot as the events above).
+    const comp = data.header?.competitions?.[0];
+    const live: EspnLiveState | null = comp
+      ? {
+          scores: Object.fromEntries(
+            (comp.competitors ?? [])
+              .filter((c) => c.team?.id != null && c.score != null)
+              .map((c) => [String(c.team!.id), Number.parseInt(String(c.score), 10) || 0]),
+          ),
+          clock: comp.status?.displayClock ?? null,
+          statusName: comp.status?.type?.name ?? '',
+          state: comp.status?.type?.state ?? null,
+        }
+      : null;
+
+    if (!teams.length && !events.length && !stats.length && !live) return null;
+    return { teams, events, stats, live };
   }
 }
 
@@ -515,6 +563,12 @@ interface EspnSummary {
   }>;
   keyEvents?: EspnKeyEvent[];
   boxscore?: EspnBoxscore;
+  header?: {
+    competitions?: Array<{
+      competitors?: Array<{ score?: string | number; team?: { id?: string | number } }>;
+      status?: { displayClock?: string; type?: { name?: string; state?: 'pre' | 'in' | 'post' } };
+    }>;
+  };
 }
 interface EspnBoxscore {
   teams?: Array<{

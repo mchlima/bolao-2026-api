@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { MatchStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { EspnEvent, EspnService } from './espn.service';
+import { clockGoesBack, EspnEvent, EspnService } from './espn.service';
 import { EventsService } from '../events/events.service';
 import { SlotResolverService } from '../structure/slot-resolver.service';
 import {
@@ -196,10 +196,14 @@ export class LiveIngestService {
               ev.scores[espnCode(m.homeTeam!.externalIds) ?? m.homeTeam!.shortName];
             const away =
               ev.scores[espnCode(m.awayTeam!.externalIds) ?? m.awayTeam!.shortName];
-            if (home !== undefined && home !== m.homeScore)
-              data.homeScore = home;
-            if (away !== undefined && away !== m.awayScore)
-              data.awayScore = away;
+            // Score is monotonic-up while LIVE (only a FINISHED match accepts an
+            // exact value, for an official/VAR correction). This feed can lag the
+            // summary robot's, so without this it would revert a goal the summary
+            // already applied — a flicker on the score.
+            const advance = (n: number | undefined, cur: number | null): boolean =>
+              n !== undefined && n !== cur && (ev.state === 'post' || n > (cur ?? 0));
+            if (advance(home, m.homeScore)) data.homeScore = home;
+            if (advance(away, m.awayScore)) data.awayScore = away;
 
             // Discipline (cards + fair-play) from the same feed — keyed by espn code.
             const homeAbbr = espnCode(m.homeTeam!.externalIds) ?? m.homeTeam!.shortName;
@@ -228,7 +232,8 @@ export class LiveIngestService {
           // the break as "Intervalo" in the live clock; the front shows it in the
           // same red live chip (uppercased → "INTERVALO").
           const clock = /HALFTIME/i.test(ev.statusName) ? 'Intervalo' : ev.clock;
-          if (clock !== m.liveClock) data.liveClock = clock;
+          // Don't let a lagging feed pull the clock backwards (see clockGoesBack).
+          if (clock !== m.liveClock && !clockGoesBack(m.liveClock, clock)) data.liveClock = clock;
         } else if (m.liveClock !== null) {
           data.liveClock = null;
         }

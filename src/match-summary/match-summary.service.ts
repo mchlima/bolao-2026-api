@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsService } from '../events/events.service';
-import { EspnMatchEvent, EspnService, EspnTeamStats } from '../live-ingest/espn.service';
+import { clockGoesBack, EspnMatchEvent, EspnService, EspnTeamStats } from '../live-ingest/espn.service';
 import { espnCode, espnExternalId, espnSlug } from '../common/external-ids';
 
 const headshot = (espnId: string) =>
@@ -101,6 +102,9 @@ export class MatchSummaryService {
         seasonId: true,
         homeTeamId: true,
         awayTeamId: true,
+        homeScore: true,
+        awayScore: true,
+        liveClock: true,
         kickoffAt: true,
         externalIds: true,
         homeTeam: { select: { externalIds: true } },
@@ -117,7 +121,7 @@ export class MatchSummaryService {
 
     const full = await this.espn.fetchSummaryFull(slug, eventId);
     if (!full) return 0;
-    const { teams, events, stats } = full;
+    const { teams, events, stats, live } = full;
 
     // Resolve every player first (auto-heal), building espnId → our playerId, so
     // sub partners can be linked even when bench-side.
@@ -174,23 +178,58 @@ export class MatchSummaryService {
 
     const home = teams.find((x) => x.homeAway === 'home');
     const away = teams.find((x) => x.homeAway === 'away');
-    await this.prisma.match.update({
-      where: { id: matchId },
-      data: { homeFormation: home?.formation ?? null, awayFormation: away?.formation ?? null },
-    });
 
-    // ESPN team id → our teamId, for placing events on a side.
+    // ESPN team id → our teamId, for placing events on a side (and the score).
     const espnTeamMap = new Map<string, string>();
     const hid = espnExternalId(match.homeTeam?.externalIds ?? null);
     const aid = espnExternalId(match.awayTeam?.externalIds ?? null);
     if (hid) espnTeamMap.set(hid, match.homeTeamId);
     if (aid) espnTeamMap.set(aid, match.awayTeamId);
+
+    // Formations + the live score and clock — read from the SAME summary snapshot
+    // as the events, so a goal and the score it produces land together in one
+    // write/emit (the scoreboard robot's feed can lag this one, which is why a
+    // goal could appear in the timeline before the score moved). Score is
+    // monotonic-up while live and the clock never regresses (clockGoesBack), so a
+    // momentary disagreement between the two feeds can't flip either back.
+    const matchData: Prisma.MatchUpdateInput = {
+      homeFormation: home?.formation ?? null,
+      awayFormation: away?.formation ?? null,
+    };
+    let scoreChanged = false;
+    let clockChanged = false;
+    if (live && (live.state === 'in' || live.state === 'post')) {
+      const advance = (n: number | undefined, cur: number | null): boolean =>
+        n !== undefined && n !== cur && (live.state === 'post' || n > (cur ?? 0));
+      const hs = hid ? live.scores[hid] : undefined;
+      const as = aid ? live.scores[aid] : undefined;
+      if (advance(hs, match.homeScore)) {
+        matchData.homeScore = hs;
+        scoreChanged = true;
+      }
+      if (advance(as, match.awayScore)) {
+        matchData.awayScore = as;
+        scoreChanged = true;
+      }
+      const clock =
+        live.state === 'in' ? (/HALFTIME/i.test(live.statusName) ? 'Intervalo' : live.clock) : null;
+      if (clock !== match.liveClock && !clockGoesBack(match.liveClock, clock)) {
+        matchData.liveClock = clock;
+        clockChanged = true;
+      }
+    }
+    await this.prisma.match.update({ where: { id: matchId }, data: matchData });
+
     const eventsChanged = await this.persistEvents(matchId, events, idByEspn, espnTeamMap);
     await this.persistStats(matchId, stats, match.homeTeamId, match.awayTeamId);
 
     const lineupChanged = written > 0 && sig(written_) !== beforeSig;
-    if (lineupChanged || eventsChanged) {
-      this.events.emit(`match:${matchId}`, `tournament:${match.seasonId}`);
+    if (lineupChanged || eventsChanged || scoreChanged || clockChanged) {
+      const rooms = [`match:${matchId}`];
+      // Score/lineup/events drive the tournament-wide views too; a bare clock tick
+      // only needs the match view to refetch.
+      if (lineupChanged || eventsChanged || scoreChanged) rooms.push(`tournament:${match.seasonId}`);
+      this.events.emit(...rooms);
     }
     return written;
   }
