@@ -192,7 +192,14 @@ describe('parseCommentaryVarEvents (VAR rulings live in commentary, not keyEvent
 
 describe('parseCommentaryActionEvents (fouls/offsides/corners/shots from commentary)', () => {
   const names = new Map([['algeria', '624'], ['argentina', '202']]);
-  const play = (id, type, text, team, parts = [], clock = { value: 600, displayValue: "10'" }) => ({
+  const play = (
+    id: string | undefined,
+    type: string,
+    text: string,
+    team: string,
+    parts: string[] = [],
+    clock: { value: number; displayValue?: string } = { value: 600, displayValue: "10'" },
+  ) => ({
     play: { id, type: { type }, text, period: { number: 1 }, clock, team: { displayName: team },
       participants: parts.map((n) => ({ athlete: { displayName: n } })) },
   });
