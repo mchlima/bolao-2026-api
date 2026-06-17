@@ -5,7 +5,7 @@ import { ScoreTier, ScoringService } from '../scoring/scoring.service';
 
 export interface RankingEntry {
   rank: number;
-  user: { id: string; name: string };
+  user: { id: string; name: string; avatarUrl: string | null };
   points: number;
   exactCount: number; // tiebreak / info
   scoredCount: number; // predictions that already counted (match had a result)
@@ -40,7 +40,7 @@ export interface EngagementResponse {
 }
 
 interface Acc {
-  user: { id: string; name: string };
+  user: { id: string; name: string; avatarUrl: string | null };
   points: number;
   exact: number;
   scored: number;
@@ -109,7 +109,9 @@ export class RankingsService {
         homeScore: true,
         awayScore: true,
         createdAt: true,
-        user: { select: { id: true, name: true, isActive: true } },
+        user: {
+          select: { id: true, name: true, isActive: true, avatarUrl: true },
+        },
       },
     });
 
@@ -119,7 +121,7 @@ export class RankingsService {
       let a = acc.get(p.userId);
       if (!a) {
         a = {
-          user: { id: p.user.id, name: p.user.name },
+          user: { id: p.user.id, name: p.user.name, avatarUrl: p.user.avatarUrl },
           points: 0,
           exact: 0,
           scored: 0,
@@ -190,7 +192,9 @@ export class RankingsService {
         homeScore: true,
         awayScore: true,
         createdAt: true,
-        user: { select: { id: true, name: true, isActive: true } },
+        user: {
+          select: { id: true, name: true, isActive: true, avatarUrl: true },
+        },
       },
     });
     const active = predictions.filter((p) => p.user.isActive);
@@ -204,7 +208,11 @@ export class RankingsService {
       const ownEntry: Acc[] = own
         ? [
             {
-              user: { id: own.user.id, name: own.user.name },
+              user: {
+                id: own.user.id,
+                name: own.user.name,
+                avatarUrl: own.user.avatarUrl,
+              },
               points: 0,
               exact: 0,
               scored: 0,
@@ -227,7 +235,7 @@ export class RankingsService {
     for (const p of predictions) {
       if (!p.user.isActive) continue;
       const a: Acc = {
-        user: { id: p.user.id, name: p.user.name },
+        user: { id: p.user.id, name: p.user.name, avatarUrl: p.user.avatarUrl },
         points: 0,
         exact: 0,
         scored: 0,

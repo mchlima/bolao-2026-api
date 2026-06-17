@@ -1,6 +1,10 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { randomUUID } from 'crypto';
 import sharp from 'sharp';
 
@@ -61,5 +65,24 @@ export class StorageService {
       }),
     );
     return `${this.publicBaseUrl}/${key}`;
+  }
+
+  /**
+   * Best-effort removal of a previously-uploaded object, given its public URL.
+   * Only deletes objects we own (URL under our public base); never throws — a
+   * dangling object is acceptable, but failing the request over cleanup is not.
+   */
+  async deleteByUrl(url: string | null | undefined): Promise<void> {
+    if (!this.client || !url) return;
+    const prefix = `${this.publicBaseUrl}/`;
+    if (!url.startsWith(prefix)) return;
+    const key = url.slice(prefix.length);
+    try {
+      await this.client.send(
+        new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
+      );
+    } catch {
+      // swallow: storage cleanup must not break the user-facing operation
+    }
   }
 }

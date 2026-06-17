@@ -19,6 +19,7 @@ const SAFE_SELECT = {
   role: true,
   isActive: true,
   timezone: true,
+  avatarUrl: true,
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.UserSelect;
@@ -166,7 +167,10 @@ export class UsersService {
     return { user: strip(user), temporaryPassword };
   }
 
-  updateProfile(id: string, data: { timezone?: string }): Promise<SafeUser> {
+  updateProfile(
+    id: string,
+    data: { name?: string; timezone?: string; avatarUrl?: string | null },
+  ): Promise<SafeUser> {
     return this.prisma.user.update({
       where: { id },
       data,

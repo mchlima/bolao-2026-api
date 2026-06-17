@@ -9,7 +9,7 @@ export interface TournamentSummary {
 }
 
 export interface PoolMemberView {
-  user: { id: string; name: string };
+  user: { id: string; name: string; avatarUrl: string | null };
   role: PoolMemberRole;
   joinedAt: Date;
 }
@@ -53,7 +53,7 @@ export interface JoinPreview {
 }
 
 export interface PoolMatchPredictionEntry {
-  user: { id: string; name: string };
+  user: { id: string; name: string; avatarUrl: string | null };
   prediction: { home: number; away: number };
   points?: number; // present once the match is scored (LIVE/FINISHED)
   tier?: ScoreTier;

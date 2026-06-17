@@ -104,7 +104,9 @@ export class PoolsService {
       include: {
         season: { select: TOURNAMENT_SELECT },
         members: {
-          include: { user: { select: { id: true, name: true } } },
+          include: {
+            user: { select: { id: true, name: true, avatarUrl: true } },
+          },
           orderBy: [{ role: 'asc' }, { joinedAt: 'asc' }],
         },
         _count: { select: { members: true } },
@@ -514,7 +516,7 @@ export class PoolsService {
       select: {
         homeScore: true,
         awayScore: true,
-        user: { select: { id: true, name: true } },
+        user: { select: { id: true, name: true, avatarUrl: true } },
       },
     });
     return {
