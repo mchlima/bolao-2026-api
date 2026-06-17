@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { MatchStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { clockGoesBack, EspnEvent, EspnService } from './espn.service';
+import { clockGoesBack, EspnEvent, EspnService, LiveScoreReconciler } from './espn.service';
 import { EventsService } from '../events/events.service';
 import { SlotResolverService } from '../structure/slot-resolver.service';
 import {
@@ -65,6 +65,7 @@ export class LiveIngestService {
   // Consecutive failed ticks — used to throttle the warning during a DB/ESPN
   // outage (otherwise a multi-minute blip floods the log every 15s).
   private failStreak = 0;
+  private readonly score = new LiveScoreReconciler();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -196,14 +197,16 @@ export class LiveIngestService {
               ev.scores[espnCode(m.homeTeam!.externalIds) ?? m.homeTeam!.shortName];
             const away =
               ev.scores[espnCode(m.awayTeam!.externalIds) ?? m.awayTeam!.shortName];
-            // Score is monotonic-up while LIVE (only a FINISHED match accepts an
-            // exact value, for an official/VAR correction). This feed can lag the
-            // summary robot's, so without this it would revert a goal the summary
-            // already applied — a flicker on the score.
-            const advance = (n: number | undefined, cur: number | null): boolean =>
-              n !== undefined && n !== cur && (ev.state === 'post' || n > (cur ?? 0));
-            if (advance(home, m.homeScore)) data.homeScore = home;
-            if (advance(away, m.awayScore)) data.awayScore = away;
+            // The score moves up at once; a drop is confirmed by persistence
+            // (LiveScoreReconciler) so a VAR annulment lowers it while a momentarily
+            // stale feed can't revert a goal the summary robot already applied — the
+            // flicker we'd otherwise get. A FINISHED match takes the exact value.
+            const isFinal = ev.state === 'post';
+            const now = Date.now();
+            const nh = this.score.reconcile(m.id, 'home', home, m.homeScore, isFinal, now);
+            const na = this.score.reconcile(m.id, 'away', away, m.awayScore, isFinal, now);
+            if (nh !== undefined) data.homeScore = nh;
+            if (na !== undefined) data.awayScore = na;
 
             // Discipline (cards + fair-play) from the same feed — keyed by espn code.
             const homeAbbr = espnCode(m.homeTeam!.externalIds) ?? m.homeTeam!.shortName;

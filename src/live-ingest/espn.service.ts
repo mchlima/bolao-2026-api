@@ -281,6 +281,72 @@ export function clockGoesBack(cur: string | null, next: string | null): boolean 
   return a !== null && b !== null && b < a;
 }
 
+// A confirmed downward score move must persist at least this long before it's
+// applied — longer than the worst lag between the two ESPN feeds (summary ticks
+// every 60s), so a momentarily-stale feed can't sneak a real-looking drop past it.
+const SCORE_DROP_CONFIRM_MS = 90_000;
+
+type PendingDrop = { value: number; since: number };
+
+/**
+ * Reconciles one side's live score against the feed. A goal can be annulled (VAR),
+ * so the score must be allowed to go DOWN — but the two ESPN feeds lag each other,
+ * and a lagging feed momentarily reports the pre-goal score, which must NOT revert
+ * a fresh goal (the flicker the monotonic guard was added to kill).
+ *
+ * We tell the two apart by persistence: an upward move applies at once; a downward
+ * move (play never lowers a score — it's always a correction) applies only after
+ * the lower value has been observed continuously for SCORE_DROP_CONFIRM_MS. A
+ * lagging feed re-asserts the higher score within a cycle and clears the pending
+ * drop; a real VAR annulment stays low and eventually applies. At FINISHED the
+ * feed is authoritative, so the exact value is taken immediately.
+ *
+ * Keeps per-match in-memory state, so each robot owns its own instance. A process
+ * restart just resets the (short) confirmation timer — harmless.
+ */
+export class LiveScoreReconciler {
+  // matchId → side → pending downward correction awaiting confirmation.
+  private pending = new Map<string, Partial<Record<'home' | 'away', PendingDrop>>>();
+
+  /** The value to write for this side, or undefined to leave it unchanged. */
+  reconcile(
+    matchId: string,
+    side: 'home' | 'away',
+    reported: number | undefined,
+    current: number | null,
+    isFinal: boolean,
+    now: number,
+  ): number | undefined {
+    const clear = () => {
+      const p = this.pending.get(matchId);
+      if (!p) return;
+      delete p[side];
+      if (!p.home && !p.away) this.pending.delete(matchId);
+    };
+    const cur = current ?? 0;
+    if (reported === undefined || reported === cur) {
+      clear();
+      return undefined;
+    }
+    if (isFinal || reported > cur) {
+      clear();
+      return reported;
+    }
+    // reported < cur → a downward correction; apply only once it has persisted.
+    const p = this.pending.get(matchId) ?? {};
+    const prev = p[side];
+    if (prev && prev.value === reported && now - prev.since >= SCORE_DROP_CONFIRM_MS) {
+      clear();
+      return reported;
+    }
+    if (!prev || prev.value !== reported) {
+      p[side] = { value: reported, since: now };
+      this.pending.set(matchId, p);
+    }
+    return undefined;
+  }
+}
+
 /** Keep only meaningful events; participants[0]=scorer/sub-in, [1]=assist/sub-off.
  * Shootout spot-kicks are pinned to period 5 so they group as a separate
  * "Disputa de pênaltis" block, apart from any extra-time events. */

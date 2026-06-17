@@ -3,7 +3,13 @@ import { Cron } from '@nestjs/schedule';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsService } from '../events/events.service';
-import { clockGoesBack, EspnMatchEvent, EspnService, EspnTeamStats } from '../live-ingest/espn.service';
+import {
+  clockGoesBack,
+  EspnMatchEvent,
+  EspnService,
+  EspnTeamStats,
+  LiveScoreReconciler,
+} from '../live-ingest/espn.service';
 import { espnCode, espnExternalId, espnSlug } from '../common/external-ids';
 
 const headshot = (espnId: string) =>
@@ -40,6 +46,7 @@ const TICK_CRON = '*/60 * * * * *'; // every 60s — gentler than the score tick
 export class MatchSummaryService {
   private readonly logger = new Logger(MatchSummaryService.name);
   private running = false;
+  private readonly score = new LiveScoreReconciler();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -189,9 +196,11 @@ export class MatchSummaryService {
     // Formations + the live score and clock — read from the SAME summary snapshot
     // as the events, so a goal and the score it produces land together in one
     // write/emit (the scoreboard robot's feed can lag this one, which is why a
-    // goal could appear in the timeline before the score moved). Score is
-    // monotonic-up while live and the clock never regresses (clockGoesBack), so a
-    // momentary disagreement between the two feeds can't flip either back.
+    // goal could appear in the timeline before the score moved). The score moves
+    // up at once but a drop is confirmed by persistence (LiveScoreReconciler — a
+    // VAR annulment lowers it, a lagging feed can't), and the clock never regresses
+    // (clockGoesBack), so a momentary disagreement between the feeds can't flip
+    // either back.
     const matchData: Prisma.MatchUpdateInput = {
       homeFormation: home?.formation ?? null,
       awayFormation: away?.formation ?? null,
@@ -199,16 +208,18 @@ export class MatchSummaryService {
     let scoreChanged = false;
     let clockChanged = false;
     if (live && (live.state === 'in' || live.state === 'post')) {
-      const advance = (n: number | undefined, cur: number | null): boolean =>
-        n !== undefined && n !== cur && (live.state === 'post' || n > (cur ?? 0));
+      const isFinal = live.state === 'post';
+      const now = Date.now();
       const hs = hid ? live.scores[hid] : undefined;
       const as = aid ? live.scores[aid] : undefined;
-      if (advance(hs, match.homeScore)) {
-        matchData.homeScore = hs;
+      const nh = this.score.reconcile(matchId, 'home', hs, match.homeScore, isFinal, now);
+      const na = this.score.reconcile(matchId, 'away', as, match.awayScore, isFinal, now);
+      if (nh !== undefined) {
+        matchData.homeScore = nh;
         scoreChanged = true;
       }
-      if (advance(as, match.awayScore)) {
-        matchData.awayScore = as;
+      if (na !== undefined) {
+        matchData.awayScore = na;
         scoreChanged = true;
       }
       const clock =
