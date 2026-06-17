@@ -84,7 +84,12 @@ export class TimelineService {
     if (!match) {
       throw new NotFoundException({ code: 'NOT_FOUND', message: 'Partida não encontrada.' });
     }
-    if (!match.events.length) return { available: false, periods: [] };
+    // PERIOD_START markers only seed a period header — they don't count as real
+    // content, so the live "A partida começou" empty-state stays until an actual
+    // event (or the half-time whistle) lands.
+    if (!match.events.some((e) => e.type !== 'PERIOD_START')) {
+      return { available: false, periods: [] };
+    }
 
     // Re-order in JS: the DB sort by clockValue can't separate stoppage-time
     // events (ESPN caps it at 5400), so derive the order from the minute and pin
@@ -101,6 +106,9 @@ export class TimelineService {
     for (const e of ordered) {
       const side = e.teamId === match.homeTeamId ? 'home' : e.teamId === match.awayTeamId ? 'away' : null;
       const arr = byPeriod.get(e.period) ?? byPeriod.set(e.period, []).get(e.period)!;
+      // PERIOD_START just ensures the period (its header) exists — e.g. "2º tempo"
+      // appears the instant the half restarts; it renders no row of its own.
+      if (e.type === 'PERIOD_START') continue;
       // ESPN emits each stoppage as a PAIR of Start Delay entries — one carrying
       // the reason, one generic ("Jogo paralisado"). Collapse delays sharing a
       // minute into a single row, keeping the most specific reason.

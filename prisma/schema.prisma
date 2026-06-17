@@ -425,7 +425,7 @@ model MatchEvent {
   id              String   @id @default(cuid())
   matchId         String
   teamId          String?
-  type            String // GOAL / OWN_GOAL / PENALTY_GOAL / PENALTY_MISSED / YELLOW / RED / SECOND_YELLOW / SUBSTITUTION / VAR / DELAY / PERIOD_END
+  type            String // GOAL / OWN_GOAL / PENALTY_GOAL / PENALTY_MISSED / YELLOW / RED / SECOND_YELLOW / SUBSTITUTION / VAR / DELAY / PERIOD_START / PERIOD_END
   minute          String? // "78'"
   clockValue      Int      @default(0) // seconds into the match, for ordering
   period          Int      @default(1) // 1, 2, 3/4 (ET halves), 5 (shootout)

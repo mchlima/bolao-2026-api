@@ -114,6 +114,7 @@ export interface EspnMatchEvent {
     | 'SUBSTITUTION'
     | 'VAR' // a VAR review/decision (detail summarises it)
     | 'DELAY' // injury / drinks break / VAR check stoppage (detail = reason)
+    | 'PERIOD_START' // kickoff of a resumed half — seeds the period header, no row
     | 'PERIOD_END';
   detail: string | null; // short pt label: goal method, VAR decision, delay reason, miss/save
   minute: string | null;
@@ -214,8 +215,7 @@ function classifyEvent(
   }
 
   // Referee whistle ending a period: ESPN "Halftime" (id 81), "End Regular Time"
-  // (83), and the extra-time / full-time variants. Kickoff / start-2nd are
-  // skipped (the period header already marks the start).
+  // (83), and the extra-time / full-time variants.
   if (
     t === 'halftime' ||
     t.includes('end regular time') ||
@@ -226,7 +226,17 @@ function classifyEvent(
     t.includes('end of second half')
   )
     return { type: 'PERIOD_END', detail: null };
-  return null; // skip non-events (kickoff / start-2nd)
+
+  // Kickoff of a RESUMED period — surfaces its header the moment the half
+  // restarts, before any event lands. The 1st-half "Kickoff" is left out on
+  // purpose (the live "A partida começou" empty-state covers the pre-event gap).
+  if (
+    t.includes('start 2nd half') ||
+    t.includes('start second half') ||
+    (t.includes('start') && t.includes('extra'))
+  )
+    return { type: 'PERIOD_START', detail: null };
+  return null; // skip non-events (1st-half kickoff)
 }
 
 /** Per-team boxscore statistics (raw name → value); curation happens on persist. */
