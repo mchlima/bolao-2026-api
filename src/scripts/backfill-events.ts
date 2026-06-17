@@ -15,6 +15,7 @@
  */
 import { PrismaService } from '../prisma/prisma.service';
 import { EspnService } from '../live-ingest/espn.service';
+import { AlertsService } from '../alerts/alerts.service';
 import { EventsService } from '../events/events.service';
 import { MatchSummaryService } from '../match-summary/match-summary.service';
 
@@ -24,7 +25,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function main(): Promise<void> {
   const limit = Number(process.argv[2]) || undefined;
   const prisma = new PrismaService();
-  const espn = new EspnService();
+  const espn = new EspnService(new AlertsService());
   const events = new EventsService();
   const summary = new MatchSummaryService(prisma, espn, events);
 

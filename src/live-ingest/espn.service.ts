@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { AlertsService } from '../alerts/alerts.service';
 
 /** A parsed fixture from the ESPN public scoreboard. */
 export interface EspnEvent {
@@ -557,6 +558,8 @@ export class EspnService {
   private blockedUntil = 0;
   private backoffStreak = 0;
 
+  constructor(private readonly alerts: AlertsService) {}
+
   /**
    * Shared GET → JSON for the unofficial ESPN endpoints. Sends a browser UA,
    * honours an active cooldown (returns null WITHOUT calling out), and on a
@@ -576,7 +579,7 @@ export class EspnService {
       return null;
     }
     if (res.status === 429 || res.status === 503) {
-      this.noteRateLimit(res.headers.get('retry-after'));
+      this.noteRateLimit(res.headers.get('retry-after'), label);
       return null;
     }
     if (!res.ok) {
@@ -584,9 +587,11 @@ export class EspnService {
       return null;
     }
     if (this.backoffStreak > 0) {
-      this.logger.log(`ESPN recovered after ${this.backoffStreak} backoff(s)`);
+      const streak = this.backoffStreak;
+      this.logger.log(`ESPN recovered after ${streak} backoff(s)`);
       this.backoffStreak = 0;
       this.blockedUntil = 0;
+      void this.alerts.notify('ESPN normalizada', `Voltou a responder apos ${streak} backoff(s). ✅`);
     }
     return (await res.json()) as T;
   }
@@ -595,7 +600,7 @@ export class EspnService {
    * Arm (or grow) the cooldown after a rate-limit. Uses Retry-After when the
    * header is present (seconds or HTTP-date), else exponential 30s·2^n, capped.
    */
-  private noteRateLimit(retryAfter: string | null): void {
+  private noteRateLimit(retryAfter: string | null, label: string): void {
     let wait = 0;
     if (retryAfter) {
       const secs = Number(retryAfter);
@@ -606,9 +611,18 @@ export class EspnService {
       }
     }
     if (wait <= 0) wait = Math.min(MAX_BACKOFF_MS, 30_000 * 2 ** this.backoffStreak);
+    // Alert once at the START of a backoff episode (streak 0→1), not on every 429,
+    // so a sustained block sends one heads-up, not a flood. Recovery sends the all-clear.
+    const firstOfEpisode = this.backoffStreak === 0;
     this.backoffStreak++;
     this.blockedUntil = Date.now() + wait;
     this.logger.warn(`ESPN rate-limited — backing off ${Math.round(wait / 1000)}s`);
+    if (firstOfEpisode)
+      void this.alerts.notify(
+        'ESPN bloqueada',
+        `Rate-limit (429/503) em ${label}. Pausando chamadas por ~${Math.round(wait / 1000)}s. ⚠️`,
+        'high',
+      );
   }
 
   async fetchScoreboard(

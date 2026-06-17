@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { EspnService } from '../src/live-ingest/espn.service';
+import { AlertsService } from '../src/alerts/alerts.service';
 import { EventsService } from '../src/events/events.service';
 import { MatchSummaryService } from '../src/match-summary/match-summary.service';
 
@@ -21,7 +22,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
   const prisma = new PrismaService();
-  const svc = new MatchSummaryService(prisma, new EspnService(), new EventsService());
+  const svc = new MatchSummaryService(prisma, new EspnService(new AlertsService()), new EventsService());
 
   // Matches that have been played and carry an ESPN event id.
   const matches = await prisma.match.findMany({

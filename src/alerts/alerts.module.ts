@@ -1,0 +1,10 @@
+import { Global, Module } from '@nestjs/common';
+import { AlertsService } from './alerts.service';
+
+// Global so any service can inject AlertsService without re-importing the module.
+@Global()
+@Module({
+  providers: [AlertsService],
+  exports: [AlertsService],
+})
+export class AlertsModule {}

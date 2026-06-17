@@ -27,12 +27,14 @@ import { MatchSummaryModule } from './match-summary/match-summary.module';
 import { BackupModule } from './backup/backup.module';
 import { AgendaModule } from './agenda/agenda.module';
 import { EventsModule } from './events/events.module';
+import { AlertsModule } from './alerts/alerts.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
     PrismaModule,
+    AlertsModule,
     EventsModule,
     ScoringModule,
     AuditModule,
