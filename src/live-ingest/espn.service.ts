@@ -406,8 +406,11 @@ export function parseCommentaryVarEvents(
  * never the English narration, so the front renders each locale's label. Names
  * come without ids (resolved by name on persist); team via the header name→id map.
  *
- * Quirks: a foul emits a PAIR — "Foul by X" (the offender) and "Y wins a free
- * kick" (the victim) — so only the offender half is kept. An offside's
+ * Quirks: a foul CAN emit a pair — "Foul by X" (the offender) and "Y wins a free
+ * kick" (the victim) — but ESPN often sends only ONE of the two (frequently just
+ * the "wins a free kick" half). So we keep both forms and only drop a "wins a free
+ * kick" when its exact "Foul by" twin (same period + second) is present — otherwise
+ * dropping them all loses every foul ESPN reported only that way. An offside's
  * participants name the passer, not the caught player, so that name is read from
  * the text instead. A corner names no player. Ids are namespaced ("cmt:").
  */
@@ -419,6 +422,19 @@ export function parseCommentaryActionEvents(
   const per = (p: EspnCommentaryPlay): number => Number(p.period?.number ?? 1) || 1;
   const part = (p: EspnCommentaryPlay, i: number): string | null =>
     p.participants?.[i]?.athlete?.displayName ?? null;
+
+  // Moments that already have an explicit "Foul by X" — used to drop the redundant
+  // "wins a free kick" twin only when the offender half is actually present.
+  const foulByAt = new Set<string>();
+  for (const c of commentary) {
+    const p = c?.play;
+    if (
+      p?.id &&
+      (p.type?.type ?? '').toLowerCase() === 'foul' &&
+      (p.text ?? '').toLowerCase().startsWith('foul by')
+    )
+      foulByAt.add(`${per(p)}:${secs(p)}`);
+  }
 
   const out: EspnMatchEvent[] = [];
   for (const c of commentary) {
@@ -432,7 +448,10 @@ export function parseCommentaryActionEvents(
     let relatedName: string | null = null;
     let detail: string | null = null;
     if (tt === 'foul') {
-      if (!tx.startsWith('foul by')) continue; // drop the "wins a free kick" twin
+      // Keep "Foul by X"; keep "X wins a free kick" only when no offender twin
+      // exists at the same moment (else it'd duplicate the kept "Foul by").
+      if (!tx.startsWith('foul by') && foulByAt.has(`${per(p)}:${secs(p)}`))
+        continue;
       type = 'FOUL';
       playerName = part(p, 0);
     } else if (tt === 'offside') {
