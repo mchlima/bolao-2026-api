@@ -557,6 +557,8 @@ model Match {
   phaseLabel      String? // e.g. "Fase de Grupos", "Oitavas de final"
   groupName       String? // "A".."L" for the group stage (mirrors Group.name)
   matchNumber     Int? // official fixture number within the season (1..N)
+  attendance      Int? // crowd, from ESPN summary gameInfo.attendance
+  referee         String? // main referee name, from ESPN summary gameInfo.officials
   // Manual override for the prediction window. NULL = follow the automatic rule
   // (open while SCHEDULED and before kickoff); true/false force open/closed.
   predictionsOpen Boolean?

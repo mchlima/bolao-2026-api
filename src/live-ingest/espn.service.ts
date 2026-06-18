@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AlertsService } from '../alerts/alerts.service';
+import { normalizeRefereeName } from '../common/referee';
 
 /** A parsed fixture from the ESPN public scoreboard. */
 export interface EspnEvent {
@@ -733,6 +734,7 @@ export class EspnService {
     events: EspnMatchEvent[];
     stats: EspnTeamStats[];
     live: EspnLiveState | null;
+    gameInfo: { attendance: number | null; referee: string | null };
   } | null> {
     const data = await this.getJson<EspnSummary>(summaryUrl(slug, eventId), `${slug}/${eventId}`);
     if (!data) return null;
@@ -816,8 +818,22 @@ export class EspnService {
         }
       : null;
 
+    // gameInfo: crowd + the main referee (the official whose position is exactly
+    // "Referee", not an assistant / fourth / VAR).
+    const gi = data.gameInfo;
+    const attendance =
+      typeof gi?.attendance === 'number' && gi.attendance > 0 ? gi.attendance : null;
+    let referee: string | null = null;
+    for (const o of gi?.officials ?? []) {
+      if ((o.position?.displayName ?? '').toLowerCase() === 'referee') {
+        referee = normalizeRefereeName(o.displayName ?? o.fullName);
+        break;
+      }
+    }
+    const gameInfo = { attendance, referee };
+
     if (!teams.length && !events.length && !stats.length && !live) return null;
-    return { teams, events, stats, live };
+    return { teams, events, stats, live, gameInfo };
   }
 }
 
@@ -893,6 +909,14 @@ interface EspnSummary {
         team?: { id?: string | number; displayName?: string };
       }>;
       status?: { displayClock?: string; type?: { name?: string; state?: 'pre' | 'in' | 'post' } };
+    }>;
+  };
+  gameInfo?: {
+    attendance?: number;
+    officials?: Array<{
+      displayName?: string;
+      fullName?: string;
+      position?: { displayName?: string; name?: string };
     }>;
   };
 }

@@ -199,6 +199,8 @@ export class MatchSummaryService {
         homeFairPlay: true,
         awayFairPlay: true,
         liveClock: true,
+        attendance: true,
+        referee: true,
         kickoffAt: true,
         externalIds: true,
         homeTeam: { select: { shortName: true, externalIds: true } },
@@ -230,6 +232,7 @@ export class MatchSummaryService {
 
     const live = full?.live ?? null;
     const events = full?.events ?? [];
+    const gameInfo = full?.gameInfo ?? null;
 
     const matchData: Prisma.MatchUpdateInput = {};
     let scoreChanged = false;
@@ -243,6 +246,13 @@ export class MatchSummaryService {
       matchData.externalIds = mergeExternalIds(match.externalIds, 'espn', {
         id: eventId,
       });
+
+    // Crowd + main referee (ESPN gameInfo). Write once each value appears; never
+    // overwrite a known value with a later-missing one, and skip a no-op rewrite.
+    if (gameInfo?.attendance != null && gameInfo.attendance !== match.attendance)
+      matchData.attendance = gameInfo.attendance;
+    if (gameInfo?.referee && gameInfo.referee !== match.referee)
+      matchData.referee = gameInfo.referee;
 
     // ESPN team id → our teamId (event placement + summary score, which keys by id);
     // team abbreviation → scoreboard score/card keys (it keys by code, not id).

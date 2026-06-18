@@ -15,6 +15,7 @@ const MATCH_INCLUDE = {
   awayTeam: true,
   stadium: true,
   season: { select: { id: true, name: true, status: true } },
+  round: { select: { number: true, name: true } },
 } satisfies Prisma.MatchInclude;
 
 export type MatchWithRelations = Prisma.MatchGetPayload<{
