@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { MatchStatus, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsService } from '../events/events.service';
 import { MonitorService } from '../monitor/monitor.service';
@@ -12,11 +12,8 @@ import {
   EspnTeamStats,
   LiveScoreReconciler,
 } from '../live-ingest/espn.service';
-import {
-  RANK,
-  scoreboardDates,
-  STATE_TO_STATUS,
-} from '../live-ingest/live-ingest.service';
+import { scoreboardDates } from '../live-ingest/live-ingest.service';
+import { raiseStatus, resumedClock } from './live-merge';
 import { SlotResolverService } from '../structure/slot-resolver.service';
 import {
   espnCode,
@@ -360,12 +357,8 @@ export class MatchSummaryService {
     const states = [sbState, smState].filter(
       (s): s is 'pre' | 'in' | 'post' => !!s,
     );
-    let target: MatchStatus | undefined;
-    for (const s of states) {
-      const t = STATE_TO_STATUS[s];
-      if (!target || RANK[t] > RANK[target]) target = t;
-    }
-    if (match.autoManaged && target && RANK[target] > RANK[match.status]) {
+    const target = raiseStatus(match.status, states);
+    if (match.autoManaged && target) {
       matchData.status = target;
       statusChanged = true;
     }
@@ -460,7 +453,7 @@ export class MatchSummaryService {
         clock =
           live.state === 'in'
             ? /HALFTIME/i.test(live.statusName)
-              ? (this.resumedClock(events) ?? 'Intervalo')
+              ? (resumedClock(events) ?? 'Intervalo')
               : live.clock
             : null;
       } else if (sb && (sb.state === 'in' || sb.state === 'post')) {
@@ -533,24 +526,6 @@ export class MatchSummaryService {
       this.events.emit(...rooms);
     }
     return written;
-  }
-
-  /** During the half-time break the events feed reaches the 2nd half before the
-   * header does. If any 2nd-half event (period ≥ 2) has landed, the break is over —
-   * return the latest such event's minute so the clock resumes WITH the narration
-   * instead of sticking on "Intervalo". Null when still genuinely at the break. */
-  private resumedClock(events: EspnMatchEvent[]): string | null {
-    let latest: EspnMatchEvent | undefined;
-    for (const e of events) {
-      if (e.period < 2) continue;
-      if (
-        !latest ||
-        e.period > latest.period ||
-        (e.period === latest.period && e.clockValue > latest.clockValue)
-      )
-        latest = e;
-    }
-    return latest?.minute ?? null;
   }
 
   /** Link a scoreboard event to a match: stored ESPN id first, else by BOTH team
