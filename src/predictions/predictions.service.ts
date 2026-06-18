@@ -35,6 +35,7 @@ type MatchWithTeams = Prisma.MatchGetPayload<{
     homeTeam: true;
     awayTeam: true;
     round: { select: { number: true; name: true } };
+    stadium: { select: { name: true; city: true; state: true; country: true } };
   };
 }>;
 
@@ -180,6 +181,7 @@ export class PredictionsService {
           homeTeam: true,
           awayTeam: true,
           round: { select: { number: true, name: true } },
+          stadium: { select: { name: true, city: true, state: true, country: true } },
         },
         orderBy: { kickoffAt: 'asc' },
       }),
