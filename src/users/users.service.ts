@@ -178,6 +178,10 @@ export class UsersService {
     });
   }
 
+  async findOneSafe(id: string): Promise<SafeUser> {
+    return strip(await this.getOrThrow(id));
+  }
+
   private async getOrThrow(id: string): Promise<User> {
     const user = await this.findById(id);
     if (!user) {

@@ -31,6 +31,11 @@ export class AdminUsersController {
     return this.users.findAllPaginated(query);
   }
 
+  @Get(':id')
+  getOne(@Param('id') id: string): Promise<SafeUser> {
+    return this.users.findOneSafe(id);
+  }
+
   @Patch(':id/role')
   setRole(
     @Param('id') id: string,
