@@ -31,7 +31,11 @@ export type PredictionView = PredictionWithMatch & {
 };
 
 type MatchWithTeams = Prisma.MatchGetPayload<{
-  include: { homeTeam: true; awayTeam: true };
+  include: {
+    homeTeam: true;
+    awayTeam: true;
+    round: { select: { number: true; name: true } };
+  };
 }>;
 
 /** One row of the admin "predictions of a user" view: every match of a season,
@@ -172,7 +176,11 @@ export class PredictionsService {
           homeTeamId: { not: null },
           awayTeamId: { not: null },
         },
-        include: { homeTeam: true, awayTeam: true },
+        include: {
+          homeTeam: true,
+          awayTeam: true,
+          round: { select: { number: true, name: true } },
+        },
         orderBy: { kickoffAt: 'asc' },
       }),
       this.prisma.prediction.findMany({
