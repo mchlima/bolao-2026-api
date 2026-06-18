@@ -1,19 +1,29 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { Prisma } from '@prisma/client';
+import { MatchStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsService } from '../events/events.service';
 import { MonitorService } from '../monitor/monitor.service';
 import {
   clockGoesBack,
+  EspnEvent,
   EspnMatchEvent,
   EspnService,
   EspnTeamStats,
   LiveScoreReconciler,
 } from '../live-ingest/espn.service';
-import { RANK, STATE_TO_STATUS } from '../live-ingest/live-ingest.service';
+import {
+  RANK,
+  scoreboardDates,
+  STATE_TO_STATUS,
+} from '../live-ingest/live-ingest.service';
 import { SlotResolverService } from '../structure/slot-resolver.service';
-import { espnCode, espnExternalId, espnSlug } from '../common/external-ids';
+import {
+  espnCode,
+  espnExternalId,
+  espnSlug,
+  mergeExternalIds,
+} from '../common/external-ids';
 
 const headshot = (espnId: string) =>
   `https://a.espncdn.com/i/headshots/soccer/players/full/${espnId}.png`;
@@ -37,17 +47,27 @@ const STAT_MAP: Record<string, { label: string; order: number }> = {
 // score robot's; keep ingesting until a few hours after kickoff.
 const PRE_WINDOW_MIN = 75;
 const POST_WINDOW_HOURS = 3;
-const TICK_CRON = '*/10 * * * * *'; // every 10s — fastest narration. Heaviest
-// fetch (lineup + events + commentary + stats per in-window match): on a busy
-// fixture day this risks ESPN rate-limiting; the shared backoff pauses all calls
-// and now fires a webhook alert (AlertsService), and the `running` guard skips a
-// tick if the previous one is still working, so it can't pile up.
+const TICK_CRON = '*/15 * * * * *'; // every 15s (60/15 → even spacing). One tick =
+// 1 scoreboard fetch per league (batch baseline) + 1 summary fetch per in-window
+// match (lineup + keyEvents + commentary + stats). On a busy fixture day that risks
+// ESPN rate-limiting; the shared backoff pauses all calls and fires a webhook alert
+// (AlertsService), and the `running` guard skips a tick if the previous one is still
+// working, so it can't pile up. 15s also bounds how far the commentary sliding
+// window can scroll between ticks (the post-whistle grace keeps catching the tail).
 
 /**
- * Reads the ESPN match summary (lineups, and later events/stats) and PERSISTS it
- * to our DB, so the front consumes our backend only — never ESPN. Runs in the
- * pre-match → post-match window, upserts any unseen player on the fly
- * (auto-heal), and emits the realtime signal when the lineup changed.
+ * THE live-ingestion robot (single writer). Per tick it pulls both ESPN endpoints
+ * for every in-window match and persists a merged snapshot to OUR DB, so the front
+ * consumes our backend only — never ESPN:
+ *  • scoreboard (1 fetch/league) — baseline score/status/clock, cards/fair-play, and
+ *    the ESPN event id;
+ *  • summary (1 fetch/match) — lineups, keyEvents + commentary, stats, and a live
+ *    header that LEADS the scoreboard at the kickoff/half-time/full-time transitions.
+ * The two are merged with the most-advanced value winning on the overlap (one-way via
+ * RANK/clockGoesBack), so neither pulls the other back and a failed summary fetch still
+ * leaves the scoreboard baseline. Replaces the old two-robot setup (LiveIngestService
+ * is retired) — being the only writer is what lets the half-time clock resume cleanly.
+ * Auto-heals unseen players, and emits the realtime signal on any change.
  */
 @Injectable()
 export class MatchSummaryService {
@@ -82,13 +102,22 @@ export class MatchSummaryService {
 
   private async run(): Promise<void> {
     const now = new Date();
-    const matches = await this.prisma.match.findMany({
+    // In-window matches: LIVE, near-kickoff, or recently finished. Admin-managed
+    // matches (autoManaged:false) are NOT filtered out here — they still get their
+    // narration/lineup/stats from the feed; ingest() only skips the score/status/
+    // clock/cards merge for them (those the admin owns).
+    const candidates = await this.prisma.match.findMany({
       where: {
         homeTeamId: { not: null },
         awayTeamId: { not: null },
         OR: [
           { status: 'LIVE' },
           {
+            // Kept ingesting well past the final whistle (FINISHED stays in window
+            // for the whole post-window), so trailing data — a late VAR ruling, the
+            // closing commentary, the final stats — is still captured. The displayed
+            // status flipping to FINISHED never gates ingestion off (events are
+            // append-only); only the chip changes.
             status: { in: ['SCHEDULED', 'FINISHED'] },
             kickoffAt: {
               gte: new Date(now.getTime() - POST_WINDOW_HOURS * 3_600_000),
@@ -97,184 +126,272 @@ export class MatchSummaryService {
           },
         ],
       },
-      select: { id: true },
+      select: {
+        id: true,
+        kickoffAt: true,
+        externalIds: true,
+        homeTeam: { select: { shortName: true, externalIds: true } },
+        awayTeam: { select: { shortName: true, externalIds: true } },
+        season: { select: { competition: { select: { externalIds: true } } } },
+      },
     });
-    for (const m of matches) {
+    if (candidates.length === 0) return;
+
+    // One scoreboard fetch per league serves every match of that league — the cheap
+    // baseline (score/status/clock/cards + the ESPN event id). The per-match summary
+    // fetch then enriches (lineup/events/stats) and LEADS at the transitions.
+    const bySlug = new Map<string, typeof candidates>();
+    for (const m of candidates) {
+      const slug = espnSlug(m.season.competition.externalIds) ?? 'fifa.world';
+      (bySlug.get(slug) ?? bySlug.set(slug, []).get(slug)!).push(m);
+    }
+    for (const [slug, group] of bySlug) {
+      let sbEvents: EspnEvent[] = [];
       try {
-        await this.ingest(m.id);
-      } catch (e) {
-        this.logger.warn(
-          `summary ingest ${m.id} failed: ${(e as Error).message.split('\n')[0]}`,
+        sbEvents = await this.espn.fetchScoreboard(
+          slug,
+          scoreboardDates(group),
         );
+      } catch (e) {
+        // A scoreboard failure must not sink the pass — fall through with no
+        // baseline; each match still gets its summary fetch (and vice-versa).
+        this.logger.warn(
+          `scoreboard ${slug} failed: ${(e as Error).message.split('\n')[0]}`,
+        );
+      }
+      for (const m of group) {
+        try {
+          await this.ingest(m.id, this.findScoreboardEvent(sbEvents, m));
+        } catch (e) {
+          this.logger.warn(
+            `summary ingest ${m.id} failed: ${(e as Error).message.split('\n')[0]}`,
+          );
+        }
       }
     }
   }
 
   /**
-   * Fetch the ESPN summary for one match and persist its lineup + formations.
-   * Auto-heals players. Emits `match:`/`tournament:` when the lineup changed.
-   * Returns the number of entries written (0 when no lineup yet).
+   * Ingest one match from BOTH ESPN endpoints and persist the merged result. The
+   * scoreboard event (pre-fetched per league by run(), or resolved here for a
+   * standalone call) is the baseline + the only source of cards/fair-play and the
+   * ESPN event id; the summary adds lineups/events/stats and a live header that
+   * LEADS at the transitions. For the overlap (status/score/clock) the most-advanced
+   * value wins, kept one-way by RANK/clockGoesBack — so neither feed pulls the other
+   * back, and a summary fetch that fails still leaves the scoreboard baseline applied.
+   * Events are append-only and persist regardless of the displayed status, so a late
+   * VAR ruling or the closing commentary after the whistle is never dropped.
+   * Returns lineup entries written (0 when there's no lineup yet).
    */
-  async ingest(matchId: string): Promise<number> {
+  async ingest(matchId: string, sbEvent?: EspnEvent): Promise<number> {
     const match = await this.prisma.match.findUnique({
       where: { id: matchId },
       select: {
         id: true,
         seasonId: true,
         status: true,
+        autoManaged: true,
         homeTeamId: true,
         awayTeamId: true,
         homeScore: true,
         awayScore: true,
+        homeYellow: true,
+        homeRed: true,
+        awayYellow: true,
+        awayRed: true,
+        homeFairPlay: true,
+        awayFairPlay: true,
         liveClock: true,
         kickoffAt: true,
         externalIds: true,
-        homeTeam: { select: { externalIds: true } },
-        awayTeam: { select: { externalIds: true } },
+        homeTeam: { select: { shortName: true, externalIds: true } },
+        awayTeam: { select: { shortName: true, externalIds: true } },
         season: { select: { competition: { select: { externalIds: true } } } },
       },
     });
     if (!match?.homeTeamId || !match.awayTeamId) return 0;
 
     const slug = espnSlug(match.season.competition.externalIds) ?? 'fifa.world';
+    // The ESPN event id: stored first, else from the scoreboard event run() passed,
+    // else a standalone lookup. Seed it once known and not yet stored — the job the
+    // retired scoreboard robot used to own.
+    const storedId = espnExternalId(match.externalIds);
     const eventId =
-      espnExternalId(match.externalIds) ??
-      (await this.resolveEventId(match, slug));
-    if (!eventId) return 0;
+      storedId ?? sbEvent?.id ?? (await this.resolveEventId(match, slug));
 
-    const full = await this.espn.fetchSummaryFull(slug, eventId);
-    if (!full) return 0;
-    const { teams, events, stats, live } = full;
+    // POSTPONED/CANCELLED is left to the admin — exclude such a scoreboard event from
+    // the merge so it can't auto-finish or zero a match (its id is still usable).
+    const sb =
+      sbEvent && !/POSTPONED|CANCEL|SUSPEND/i.test(sbEvent.statusName)
+        ? sbEvent
+        : undefined;
 
-    // Resolve every player first (auto-heal), building espnId → our playerId, so
-    // sub partners can be linked even when bench-side.
-    const idByEspn = new Map<string, string>();
-    for (const t of teams) {
-      const teamId =
-        t.homeAway === 'away' ? match.awayTeamId : match.homeTeamId;
-      for (const p of t.players) {
-        if (!p.espnId || idByEspn.has(p.espnId)) continue;
-        idByEspn.set(
-          p.espnId,
-          await this.resolvePlayer(p.espnId, p.name, p.position, teamId),
-        );
-      }
-    }
+    const full = eventId
+      ? await this.espn.fetchSummaryFull(slug, eventId)
+      : null;
+    if (!full && !sb) return 0; // neither endpoint produced anything this tick
 
-    // Snapshot the existing lineup to detect a change before writing.
-    const before = await this.prisma.matchLineupEntry.findMany({
-      where: { matchId },
-      select: {
-        playerId: true,
-        isStarter: true,
-        subbedIn: true,
-        subbedOut: true,
-        yellow: true,
-        red: true,
-        subForPlayerId: true,
-      },
-    });
-    const sig = (rows: typeof before) =>
-      rows
-        .map(
-          (r) =>
-            `${r.playerId}:${r.isStarter}:${r.subbedIn}:${r.subbedOut}:${r.yellow}:${r.red}:${r.subForPlayerId ?? ''}`,
-        )
-        .sort()
-        .join('|');
-    const beforeSig = sig(before);
+    const live = full?.live ?? null;
+    const events = full?.events ?? [];
 
-    let written = 0;
-    const written_: typeof before = [];
-    for (const t of teams) {
-      const teamId =
-        t.homeAway === 'away' ? match.awayTeamId : match.homeTeamId;
-      for (const p of t.players) {
-        const playerId = p.espnId ? idByEspn.get(p.espnId) : undefined;
-        if (!playerId) continue;
-        const subForPlayerId = p.subForEspnId
-          ? (idByEspn.get(p.subForEspnId) ?? null)
-          : null;
-        const data = {
-          teamId,
-          isStarter: p.starter,
-          jersey: p.jersey,
-          position: p.position,
-          formationPlace: p.formationPlace,
-          subbedIn: p.subbedIn,
-          subbedOut: p.subbedOut,
-          subForPlayerId,
-          yellow: p.yellow,
-          red: p.red,
-        };
-        await this.prisma.matchLineupEntry.upsert({
-          where: { matchId_playerId: { matchId, playerId } },
-          update: data,
-          create: { matchId, playerId, ...data },
-        });
-        written++;
-        written_.push({
-          playerId,
-          isStarter: p.starter,
-          subbedIn: p.subbedIn,
-          subbedOut: p.subbedOut,
-          yellow: p.yellow,
-          red: p.red,
-          subForPlayerId,
-        });
-      }
-    }
+    const matchData: Prisma.MatchUpdateInput = {};
+    let scoreChanged = false;
+    let clockChanged = false;
+    let statusChanged = false;
+    let cardsChanged = false;
+    let lineupChanged = false;
+    let eventsChanged = false;
 
-    const home = teams.find((x) => x.homeAway === 'home');
-    const away = teams.find((x) => x.homeAway === 'away');
+    if (eventId && !storedId)
+      matchData.externalIds = mergeExternalIds(match.externalIds, 'espn', {
+        id: eventId,
+      });
 
-    // ESPN team id → our teamId, for placing events on a side (and the score).
+    // ESPN team id → our teamId (event placement + summary score, which keys by id);
+    // team abbreviation → scoreboard score/card keys (it keys by code, not id).
     const espnTeamMap = new Map<string, string>();
     const hid = espnExternalId(match.homeTeam?.externalIds ?? null);
     const aid = espnExternalId(match.awayTeam?.externalIds ?? null);
     if (hid) espnTeamMap.set(hid, match.homeTeamId);
     if (aid) espnTeamMap.set(aid, match.awayTeamId);
+    const homeCode =
+      espnCode(match.homeTeam?.externalIds) ?? match.homeTeam?.shortName;
+    const awayCode =
+      espnCode(match.awayTeam?.externalIds) ?? match.awayTeam?.shortName;
 
-    // Formations + the live score and clock — read from the SAME summary snapshot
-    // as the events, so a goal and the score it produces land together in one
-    // write/emit (the scoreboard robot's feed can lag this one, which is why a
-    // goal could appear in the timeline before the score moved). The score moves
-    // up at once but a drop is confirmed by persistence (LiveScoreReconciler — a
-    // VAR annulment lowers it, a lagging feed can't), and the clock never regresses
-    // (clockGoesBack), so a momentary disagreement between the feeds can't flip
-    // either back.
-    const matchData: Prisma.MatchUpdateInput = {
-      homeFormation: home?.formation ?? null,
-      awayFormation: away?.formation ?? null,
-    };
-    let scoreChanged = false;
-    let clockChanged = false;
-    let statusChanged = false;
-    if (live && (live.state === 'in' || live.state === 'post')) {
-      const isFinal = live.state === 'post';
-      // This robot runs faster (10s vs 20s) and its window opens earlier (75min vs
-      // 15min) than the scoreboard one, and reads `state` from a feed that flips
-      // BEFORE the scoreboard feed at both ends of the match. The status drives the
-      // hero (the "AO VIVO" chip, the kickoff countdown) and the timeline ("Fim de
-      // jogo"), and it was lagging the narration at both ends: SCHEDULED lingered
-      // past kickoff (clock already running) and LIVE lingered past the final
-      // whistle (clock already nulled). Raise it here too, monotonically (RANK), in
-      // the SAME tick that sets/nulls the clock: the hero leaves the countdown when
-      // play starts and goes straight from "90'+x" to "Resultado final" at the end —
-      // no orphan "AO VIVO" at either boundary. The RANK guard keeps it one-way, so
-      // neither robot can undo the other; whichever sees the transition first wins.
-      const target = STATE_TO_STATUS[live.state];
-      if (RANK[target] > RANK[match.status]) {
-        matchData.status = target;
-        statusChanged = true;
+    // ---------- Lineups (only when the summary fetch succeeded) ----------
+    const idByEspn = new Map<string, string>();
+    let written = 0;
+    if (full) {
+      const { teams } = full;
+      matchData.homeFormation =
+        teams.find((x) => x.homeAway === 'home')?.formation ?? null;
+      matchData.awayFormation =
+        teams.find((x) => x.homeAway === 'away')?.formation ?? null;
+
+      // Resolve every player first (auto-heal), so sub partners can be linked even
+      // when bench-side.
+      for (const t of teams) {
+        const teamId =
+          t.homeAway === 'away' ? match.awayTeamId : match.homeTeamId;
+        for (const p of t.players) {
+          if (!p.espnId || idByEspn.has(p.espnId)) continue;
+          idByEspn.set(
+            p.espnId,
+            await this.resolvePlayer(p.espnId, p.name, p.position, teamId),
+          );
+        }
       }
+
+      // Snapshot the existing lineup to detect a change before writing.
+      const before = await this.prisma.matchLineupEntry.findMany({
+        where: { matchId },
+        select: {
+          playerId: true,
+          isStarter: true,
+          subbedIn: true,
+          subbedOut: true,
+          yellow: true,
+          red: true,
+          subForPlayerId: true,
+        },
+      });
+      const sig = (rows: typeof before) =>
+        rows
+          .map(
+            (r) =>
+              `${r.playerId}:${r.isStarter}:${r.subbedIn}:${r.subbedOut}:${r.yellow}:${r.red}:${r.subForPlayerId ?? ''}`,
+          )
+          .sort()
+          .join('|');
+      const beforeSig = sig(before);
+
+      const written_: typeof before = [];
+      for (const t of teams) {
+        const teamId =
+          t.homeAway === 'away' ? match.awayTeamId : match.homeTeamId;
+        for (const p of t.players) {
+          const playerId = p.espnId ? idByEspn.get(p.espnId) : undefined;
+          if (!playerId) continue;
+          const subForPlayerId = p.subForEspnId
+            ? (idByEspn.get(p.subForEspnId) ?? null)
+            : null;
+          const data = {
+            teamId,
+            isStarter: p.starter,
+            jersey: p.jersey,
+            position: p.position,
+            formationPlace: p.formationPlace,
+            subbedIn: p.subbedIn,
+            subbedOut: p.subbedOut,
+            subForPlayerId,
+            yellow: p.yellow,
+            red: p.red,
+          };
+          await this.prisma.matchLineupEntry.upsert({
+            where: { matchId_playerId: { matchId, playerId } },
+            update: data,
+            create: { matchId, playerId, ...data },
+          });
+          written++;
+          written_.push({
+            playerId,
+            isStarter: p.starter,
+            subbedIn: p.subbedIn,
+            subbedOut: p.subbedOut,
+            yellow: p.yellow,
+            red: p.red,
+            subForPlayerId,
+          });
+        }
+      }
+      lineupChanged = written > 0 && sig(written_) !== beforeSig;
+    }
+
+    // ---------- Merge (display): status / score / clock / cards ----------
+    // Take the most-advanced state of the two feeds; the summary header leads the
+    // scoreboard at the boundaries, so prefer it for score/clock, with the scoreboard
+    // as the fallback (resilience when the summary fetch failed) and the only source
+    // of cards/fair-play. RANK/clockGoesBack keep status/clock one-way. Gated on
+    // autoManaged: a match an admin took over keeps its narration/lineup (above) but
+    // the admin owns its score/status/clock/cards — the robot doesn't touch those.
+    const sbState = sb?.state;
+    const smState = live?.state;
+    const states = [sbState, smState].filter(
+      (s): s is 'pre' | 'in' | 'post' => !!s,
+    );
+    let target: MatchStatus | undefined;
+    for (const s of states) {
+      const t = STATE_TO_STATUS[s];
+      if (!target || RANK[t] > RANK[target]) target = t;
+    }
+    if (match.autoManaged && target && RANK[target] > RANK[match.status]) {
+      matchData.status = target;
+      statusChanged = true;
+    }
+
+    if (match.autoManaged && states.some((s) => s === 'in' || s === 'post')) {
+      const isFinal =
+        sbState === 'post' ||
+        smState === 'post' ||
+        matchData.status === 'FINISHED';
       const now = Date.now();
-      const hs = hid ? live.scores[hid] : undefined;
-      const as = aid ? live.scores[aid] : undefined;
+      const reportedHome =
+        live && hid
+          ? live.scores[hid]
+          : sb && homeCode
+            ? sb.scores[homeCode]
+            : undefined;
+      const reportedAway =
+        live && aid
+          ? live.scores[aid]
+          : sb && awayCode
+            ? sb.scores[awayCode]
+            : undefined;
       const nh = this.score.reconcile(
         matchId,
         'home',
-        hs,
+        reportedHome,
         match.homeScore,
         isFinal,
         now,
@@ -282,7 +399,7 @@ export class MatchSummaryService {
       const na = this.score.reconcile(
         matchId,
         'away',
-        as,
+        reportedAway,
         match.awayScore,
         isFinal,
         now,
@@ -295,31 +412,96 @@ export class MatchSummaryService {
         matchData.awayScore = na;
         scoreChanged = true;
       }
-      const clock =
-        live.state === 'in'
-          ? /HALFTIME/i.test(live.statusName)
-            ? 'Intervalo'
-            : live.clock
-          : null;
+
+      // Cards + fair-play: scoreboard only (it ships the aggregates; the standings
+      // FIFA disciplinary tiebreak consumes them).
+      if (sb && (sbState === 'in' || sbState === 'post')) {
+        const hc = homeCode
+          ? (sb.cards[homeCode] ?? { yellow: 0, red: 0 })
+          : { yellow: 0, red: 0 };
+        const ac = awayCode
+          ? (sb.cards[awayCode] ?? { yellow: 0, red: 0 })
+          : { yellow: 0, red: 0 };
+        const hfp = homeCode ? (sb.fairPlay[homeCode] ?? 0) : 0;
+        const afp = awayCode ? (sb.fairPlay[awayCode] ?? 0) : 0;
+        if (hc.yellow !== match.homeYellow) {
+          matchData.homeYellow = hc.yellow;
+          cardsChanged = true;
+        }
+        if (hc.red !== match.homeRed) {
+          matchData.homeRed = hc.red;
+          cardsChanged = true;
+        }
+        if (ac.yellow !== match.awayYellow) {
+          matchData.awayYellow = ac.yellow;
+          cardsChanged = true;
+        }
+        if (ac.red !== match.awayRed) {
+          matchData.awayRed = ac.red;
+          cardsChanged = true;
+        }
+        if (hfp !== match.homeFairPlay) {
+          matchData.homeFairPlay = hfp;
+          cardsChanged = true;
+        }
+        if (afp !== match.awayFairPlay) {
+          matchData.awayFairPlay = afp;
+          cardsChanged = true;
+        }
+      }
+
+      // Clock: prefer the summary header. While LIVE, ESPN freezes the clock at
+      // half-time (statusName HALFTIME) → "Intervalo"; but the events feed leads the
+      // header out of the break, so once a 2nd-half event has landed (period ≥ 2) show
+      // its minute instead of a stuck "Intervalo". `post` nulls the clock. Falls back
+      // to the scoreboard when there's no summary header this tick.
+      let clock: string | null;
+      if (live && (live.state === 'in' || live.state === 'post')) {
+        clock =
+          live.state === 'in'
+            ? /HALFTIME/i.test(live.statusName)
+              ? (this.resumedClock(events) ?? 'Intervalo')
+              : live.clock
+            : null;
+      } else if (sb && (sb.state === 'in' || sb.state === 'post')) {
+        clock =
+          sb.state === 'in'
+            ? /HALFTIME/i.test(sb.statusName)
+              ? 'Intervalo'
+              : sb.clock
+            : null;
+      } else {
+        clock = match.liveClock;
+      }
       if (clock !== match.liveClock && !clockGoesBack(match.liveClock, clock)) {
         matchData.liveClock = clock;
         clockChanged = true;
       }
     }
-    await this.prisma.match.update({ where: { id: matchId }, data: matchData });
 
-    const eventsChanged = await this.persistEvents(
-      matchId,
-      events,
-      idByEspn,
-      espnTeamMap,
-    );
-    await this.persistStats(matchId, stats, match.homeTeamId, match.awayTeamId);
+    if (Object.keys(matchData).length > 0)
+      await this.prisma.match.update({
+        where: { id: matchId },
+        data: matchData,
+      });
 
-    // A status flip to FINISHED may decide a group or feed a knockout slot — when
-    // this robot is the one to finish the match, it owns the re-resolution (the
-    // scoreboard robot's monotonic guard means it won't re-set FINISHED, so it
-    // wouldn't trigger it). Mirrors live-ingest.service.ts.
+    // Append-only, independent of the displayed status (decoupled ingestion).
+    if (full) {
+      eventsChanged = await this.persistEvents(
+        matchId,
+        events,
+        idByEspn,
+        espnTeamMap,
+      );
+      await this.persistStats(
+        matchId,
+        full.stats,
+        match.homeTeamId,
+        match.awayTeamId,
+      );
+    }
+
+    // A flip to FINISHED may decide a group or feed a knockout slot — re-resolve.
     if (matchData.status === 'FINISHED') {
       try {
         await this.resolver.resolveSeason(match.seasonId);
@@ -330,22 +512,85 @@ export class MatchSummaryService {
       }
     }
 
-    const lineupChanged = written > 0 && sig(written_) !== beforeSig;
     if (
       lineupChanged ||
       eventsChanged ||
       scoreChanged ||
       clockChanged ||
-      statusChanged
+      statusChanged ||
+      cardsChanged
     ) {
       const rooms = [`match:${matchId}`];
-      // Score/lineup/events/status drive the tournament-wide views too; a bare clock
-      // tick only needs the match view to refetch.
-      if (lineupChanged || eventsChanged || scoreChanged || statusChanged)
+      // Everything but a bare clock tick also drives the tournament-wide views.
+      if (
+        lineupChanged ||
+        eventsChanged ||
+        scoreChanged ||
+        statusChanged ||
+        cardsChanged
+      )
         rooms.push(`tournament:${match.seasonId}`);
       this.events.emit(...rooms);
     }
     return written;
+  }
+
+  /** During the half-time break the events feed reaches the 2nd half before the
+   * header does. If any 2nd-half event (period ≥ 2) has landed, the break is over —
+   * return the latest such event's minute so the clock resumes WITH the narration
+   * instead of sticking on "Intervalo". Null when still genuinely at the break. */
+  private resumedClock(events: EspnMatchEvent[]): string | null {
+    let latest: EspnMatchEvent | undefined;
+    for (const e of events) {
+      if (e.period < 2) continue;
+      if (
+        !latest ||
+        e.period > latest.period ||
+        (e.period === latest.period && e.clockValue > latest.clockValue)
+      )
+        latest = e;
+    }
+    return latest?.minute ?? null;
+  }
+
+  /** Link a scoreboard event to a match: stored ESPN id first, else by BOTH team
+   * codes (a fixture's home+away pair is unique in the league), kickoff as the
+   * tiebreaker. Mirrors the retired scoreboard robot's matcher. */
+  private findScoreboardEvent(
+    events: EspnEvent[],
+    m: {
+      externalIds: Prisma.JsonValue | null;
+      kickoffAt: Date;
+      homeTeam: {
+        shortName: string;
+        externalIds: Prisma.JsonValue | null;
+      } | null;
+      awayTeam: {
+        shortName: string;
+        externalIds: Prisma.JsonValue | null;
+      } | null;
+    },
+  ): EspnEvent | undefined {
+    if (!events.length) return undefined;
+    const extId = espnExternalId(m.externalIds);
+    if (extId) {
+      const byId = events.find((e) => e.id === extId);
+      if (byId) return byId;
+    }
+    const home = espnCode(m.homeTeam?.externalIds) ?? m.homeTeam?.shortName;
+    const away = espnCode(m.awayTeam?.externalIds) ?? m.awayTeam?.shortName;
+    if (!home || !away) return undefined;
+    const pairMatches = events.filter(
+      (e) => e.abbrs.includes(home) && e.abbrs.includes(away),
+    );
+    if (pairMatches.length <= 1) return pairMatches[0];
+    const kickoff = m.kickoffAt.getTime();
+    return pairMatches.reduce((best, e) =>
+      Math.abs(new Date(e.dateIso).getTime() - kickoff) <
+      Math.abs(new Date(best.dateIso).getTime() - kickoff)
+        ? e
+        : best,
+    );
   }
 
   /** Upsert timeline events (idempotent by espnEventId). Returns true if a new

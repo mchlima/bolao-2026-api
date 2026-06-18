@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron } from '@nestjs/schedule';
 import { MatchStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -29,7 +28,7 @@ const ymdUtc = (ms: number): string =>
  * ±1 day to absorb any drift between our stored kickoff and ESPN's event date at
  * the UTC boundary; extra events are harmless (findEvent filters by id/abbrs).
  */
-function scoreboardDates(group: Array<{ kickoffAt: Date }>): string {
+export function scoreboardDates(group: Array<{ kickoffAt: Date }>): string {
   const times = group.map((m) => m.kickoffAt.getTime());
   const from = ymdUtc(Math.min(...times) - DAY_MS);
   const to = ymdUtc(Math.max(...times) + DAY_MS);
@@ -56,20 +55,13 @@ const END_WINDOW_HOURS = 3; // ...until this long after kickoff
 // catch an immediate official/VAR score correction — then it goes idle again.
 const POST_FINISH_RECONCILE_MIN = 5;
 
-// Tick cadence (6-field cron, with seconds). 20s gives ~20s worst-case
-// detection of a kickoff or goal while staying gentle on ESPN's unofficial
-// endpoint (20 divides 60 → even spacing). A tick with no match in window
-// costs just one indexed query.
-const TICK_CRON = '*/20 * * * * *';
-
 /**
- * ESPN robot: every 20s it reconciles any match inside its window (15 min before
- * kickoff until 3h after) against the ESPN scoreboard — auto-advancing status
- * (SCHEDULED → LIVE → FINISHED) and live score. Because it polls through the
- * whole window (not only once a match is already LIVE), a kickoff or goal is
- * reflected within ~20s. When no match is near, a tick is a single indexed query
- * and makes no ESPN call. Skips matches an admin took over (autoManaged=false),
- * cancelled ones, and knockout slots without both teams. ESPN is the truth.
+ * RETIRED — consolidated into MatchSummaryService (one robot, both endpoints, single
+ * writer). Its @Cron is removed so it no longer runs; the class is kept only as the
+ * home of the shared scoreboard helpers (`scoreboardDates`, `STATE_TO_STATUS`, `RANK`,
+ * the `findEvent` matcher logic) and as documentation of the old behaviour until the
+ * follow-up cleanup deletes it. The scoreboard ENDPOINT lives on — MatchSummaryService
+ * fetches it per league for the baseline/ids/cards.
  */
 @Injectable()
 export class LiveIngestService {
@@ -88,7 +80,7 @@ export class LiveIngestService {
     private readonly monitor: MonitorService,
   ) {}
 
-  @Cron(TICK_CRON)
+  // Retired: no longer scheduled (the @Cron was removed). Kept for reference.
   async tick(): Promise<void> {
     // Only the production instance drives the robot (dev shares the same DB).
     if (process.env.NODE_ENV !== 'production') return;
