@@ -32,6 +32,12 @@ export class MatchWindowService {
   private lastTick = new Date();
   private lastSeenUpdate = new Date();
   private running = false;
+  // matchId -> signature of the significant fields, so a clock-only write (which
+  // bumps updatedAt every ~15s) re-emits `match:` but NOT `tournament:`. Mirrors
+  // live-ingest's own `significant` gating — without this the cross-instance
+  // re-emit re-floods every tournament page on each live clock tick. Resets on
+  // restart (clients resync on reconnect); grows only with matches touched since.
+  private readonly lastSig = new Map<string, string>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -81,14 +87,46 @@ export class MatchWindowService {
   }
 
   /** (2) Matches written since we last looked (by any instance) — re-emit so
-   * this instance's SSE clients refetch even when another process did the write. */
+   * this instance's SSE clients refetch even when another process did the write.
+   * `match:` fires on any write (drives the match view's live clock); `tournament:`
+   * only when a significant field changed (status/score/penalties/cards), so a
+   * clock-only tick doesn't refetch every tournament/agenda page. */
   private async emitExternalUpdates(): Promise<void> {
     const updated = await this.prisma.match.findMany({
       where: { updatedAt: { gt: this.lastSeenUpdate } },
-      select: { id: true, seasonId: true, updatedAt: true },
+      select: {
+        id: true,
+        seasonId: true,
+        updatedAt: true,
+        status: true,
+        homeScore: true,
+        awayScore: true,
+        homePenalties: true,
+        awayPenalties: true,
+        homeYellow: true,
+        homeRed: true,
+        awayYellow: true,
+        awayRed: true,
+      },
     });
     for (const m of updated) {
-      this.events.emit(`match:${m.id}`, `tournament:${m.seasonId}`);
+      const sig = [
+        m.status,
+        m.homeScore,
+        m.awayScore,
+        m.homePenalties,
+        m.awayPenalties,
+        m.homeYellow,
+        m.homeRed,
+        m.awayYellow,
+        m.awayRed,
+      ].join('|');
+      // First sight (no cached sig) counts as significant — the write that bumped
+      // updatedAt is real and we can't prove it was clock-only, so don't drop it.
+      const significant = this.lastSig.get(m.id) !== sig;
+      this.lastSig.set(m.id, sig);
+      if (significant) this.events.emit(`match:${m.id}`, `tournament:${m.seasonId}`);
+      else this.events.emit(`match:${m.id}`);
       if (m.updatedAt > this.lastSeenUpdate) this.lastSeenUpdate = m.updatedAt;
     }
   }
