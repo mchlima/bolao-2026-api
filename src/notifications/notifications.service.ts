@@ -88,6 +88,33 @@ export class NotificationsService {
   }
 
   /**
+   * Deliver a one-off notification to a single user (no type/match dedup) — used
+   * for admin-authored custom messages. Writes the in-app row, pings the user's
+   * SSE room and fires a web push.
+   */
+  async deliver(
+    userId: string,
+    payload: NotificationPayload & { type?: string },
+  ): Promise<Notification> {
+    const notification = await this.prisma.notification.create({
+      data: {
+        userId,
+        type: payload.type ?? 'ADMIN_CUSTOM',
+        title: payload.title,
+        body: payload.body,
+        url: payload.url ?? null,
+      },
+    });
+    this.events.emit(`user:${userId}`); // live in-app badge
+    void this.push.sendToUser(userId, {
+      title: payload.title,
+      body: payload.body,
+      url: payload.url,
+    }); // web push
+    return notification;
+  }
+
+  /**
    * Like createMissing, but each user gets their OWN payload — for notifications
    * whose text is personal (e.g. a full-time result with the user's own points).
    * Still idempotent per (type, matchId, user); returns the freshly-notified ids.

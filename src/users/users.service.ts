@@ -24,6 +24,15 @@ const SAFE_SELECT = {
   updatedAt: true,
 } satisfies Prisma.UserSelect;
 
+// Admin list adds whether the user has any web-push subscription (drives the
+// "send notification" action — hidden when the user never enabled push).
+const ADMIN_LIST_SELECT = {
+  ...SAFE_SELECT,
+  _count: { select: { pushSubscriptions: true } },
+} satisfies Prisma.UserSelect;
+
+export type AdminUserListItem = SafeUser & { pushEnabled: boolean };
+
 export interface QueryUsersParams {
   page: number;
   pageSize: number;
@@ -59,7 +68,7 @@ export class UsersService {
 
   async findAllPaginated(
     query: QueryUsersParams,
-  ): Promise<Paginated<SafeUser>> {
+  ): Promise<Paginated<AdminUserListItem>> {
     const { page, pageSize, search, role, isActive } = query;
     const where: Prisma.UserWhereInput = {
       ...(role && { role }),
@@ -72,17 +81,21 @@ export class UsersService {
       }),
     };
 
-    const [data, total] = await this.prisma.$transaction([
+    const [rows, total] = await this.prisma.$transaction([
       this.prisma.user.findMany({
         where,
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        select: SAFE_SELECT,
+        select: ADMIN_LIST_SELECT,
       }),
       this.prisma.user.count({ where }),
     ]);
 
+    const data: AdminUserListItem[] = rows.map(({ _count, ...u }) => ({
+      ...u,
+      pushEnabled: _count.pushSubscriptions > 0,
+    }));
     return paginated(data, total, page, pageSize);
   }
 

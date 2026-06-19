@@ -150,10 +150,11 @@ model User {
   poolMemberships    PoolMember[]
   createdPoolInvites PoolInvite[]
 
-  followedTeams     FollowedTeam[]
-  followedMatches   FollowedMatch[]
-  notifications     Notification[]
-  pushSubscriptions PushSubscription[]
+  followedTeams          FollowedTeam[]
+  followedMatches        FollowedMatch[]
+  notifications          Notification[]
+  scheduledNotifications ScheduledNotification[]
+  pushSubscriptions      PushSubscription[]
 
   @@map("users")
 }
@@ -195,6 +196,28 @@ model Notification {
   @@unique([userId, type, matchId])
   @@index([userId, createdAt])
   @@map("notifications")
+}
+
+// An admin-authored notification to one user, delivered now or at a future time.
+// A minute cron picks up rows whose sendAt has passed and that aren't sent yet,
+// delivers them (in-app + web push) and stamps sentAt. "Enviar agora" = sendAt
+// now → next tick (≤1min). createdById is the admin who sent it (no FK; audit).
+model ScheduledNotification {
+  id          String    @id @default(cuid())
+  userId      String
+  title       String
+  body        String
+  url         String?
+  sendAt      DateTime
+  sentAt      DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([sentAt, sendAt])
+  @@index([userId])
+  @@map("scheduled_notifications")
 }
 
 // A team a user follows to get match reminders (~1h before kickoff). The pair is
