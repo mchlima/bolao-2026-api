@@ -503,6 +503,11 @@ model Stadium {
   city      String
   state     String? // state/region
   country   String
+  // Stadium photo mirrored to our R2 (sourced from Wikidata P18 / Wikimedia
+  // Commons). photoCredit/photoSourceUrl carry the required CC attribution.
+  photoUrl       String?
+  photoCredit    String? // "Autor / Licença" (Wikimedia Commons)
+  photoSourceUrl String? // Commons file page (provenance + attribution link)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
