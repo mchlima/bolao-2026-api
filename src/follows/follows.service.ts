@@ -79,9 +79,10 @@ export class FollowsService {
 
   /**
    * Upcoming matches the user follows — either the match itself or one of its
-   * teams. Bounded to the next 8 days (enough to cover the rest of any Mon–Sun
-   * week; the caller trims to the current week in the user's timezone) so the
-   * payload stays small. Includes the relations the home card renders.
+   * teams. Includes games happening right now (LIVE) plus those scheduled for
+   * the next 8 days (enough to cover the rest of any Mon–Sun week; the caller
+   * trims to the current week in the user's timezone) so the payload stays
+   * small. Includes the relations the home card renders.
    */
   async listUpcoming(userId: string): Promise<FollowedUpcomingMatch[]> {
     const [teams, matchFollows] = await Promise.all([
@@ -95,12 +96,25 @@ export class FollowsService {
     const now = Date.now();
     return this.prisma.match.findMany({
       where: {
-        status: 'SCHEDULED',
-        kickoffAt: { gt: new Date(now), lte: new Date(now + 8 * 24 * 60 * 60 * 1000) },
-        OR: [
-          { id: { in: matchIds } },
-          { homeTeamId: { in: teamIds } },
-          { awayTeamId: { in: teamIds } },
+        AND: [
+          {
+            OR: [
+              // Em andamento agora — sobe pro topo de "Seus jogos".
+              { status: 'LIVE' },
+              // Próximos agendados, até +8 dias.
+              {
+                status: 'SCHEDULED',
+                kickoffAt: { gt: new Date(now), lte: new Date(now + 8 * 24 * 60 * 60 * 1000) },
+              },
+            ],
+          },
+          {
+            OR: [
+              { id: { in: matchIds } },
+              { homeTeamId: { in: teamIds } },
+              { awayTeamId: { in: teamIds } },
+            ],
+          },
         ],
       },
       include: UPCOMING_INCLUDE,
