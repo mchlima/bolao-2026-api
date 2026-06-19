@@ -133,8 +133,8 @@ export class ReminderService {
       });
       if (!predictions.length) continue;
 
-      const home = m.homeTeam?.name || m.homeTeam?.shortName || 'Casa';
-      const away = m.awayTeam?.name || m.awayTeam?.shortName || 'Fora';
+      const home = m.homeTeam?.shortName || m.homeTeam?.name || 'Casa';
+      const away = m.awayTeam?.shortName || m.awayTeam?.name || 'Fora';
       const weight = (m.roundId && weightByRound.get(m.roundId)) || 1;
       const result = `${home} ${m.homeScore} x ${m.awayScore} ${away}`;
       const title = `Fim de jogo: ${home} x ${away}`;
@@ -172,8 +172,8 @@ export class ReminderService {
       const userIds = await this.audienceFor(m.id, m.homeTeamId!, m.awayTeamId!);
       if (!userIds.length) continue;
 
-      const home = m.homeTeam?.name || m.homeTeam?.shortName || 'Casa';
-      const away = m.awayTeam?.name || m.awayTeam?.shortName || 'Fora';
+      const home = m.homeTeam?.shortName || m.homeTeam?.name || 'Casa';
+      const away = m.awayTeam?.shortName || m.awayTeam?.name || 'Fora';
       const fresh = await this.notifications.createMissing(
         type,
         m.id,
