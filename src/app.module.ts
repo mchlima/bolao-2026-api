@@ -31,6 +31,7 @@ import { AlertsModule } from './alerts/alerts.module';
 import { MonitorModule } from './monitor/monitor.module';
 import { FollowsModule } from './follows/follows.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { CampaignsModule } from './campaigns/campaigns.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     PoolsModule,
     FollowsModule,
     NotificationsModule,
+    CampaignsModule,
     AdminModule,
     LiveIngestModule,
     MatchWindowModule,

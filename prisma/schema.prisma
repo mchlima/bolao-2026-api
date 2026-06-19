@@ -220,6 +220,39 @@ model ScheduledNotification {
   @@map("scheduled_notifications")
 }
 
+// A broadcast notification campaign: one message sent to an audience (all users
+// or a saved boolean filter tree), over one or more channels. Lifecycle:
+//   DRAFT      — saved, no schedule yet (sendAt null)
+//   SCHEDULED  — has sendAt; the dispatch cron sends it when due (sendAt<=now)
+//   SENDING    — claimed by the dispatcher, fanning out
+//   SENT       — finished (see deliveredCount/totalRecipients)
+//   CANCELLED  — cancelled before sending
+//   FAILED     — dispatch errored
+// channels holds the delivery channels (["inapp","push"]; "email" reserved for
+// the future). filter is the boolean tree (null when audienceAll). Designed so
+// adding e-mail is just a new channel + a delivery branch — no schema change.
+model NotificationCampaign {
+  id              String    @id @default(cuid())
+  title           String
+  body            String
+  url             String?
+  channels        String[] // ["inapp","push"] (future: "email")
+  audienceAll     Boolean   @default(false) // true = todos; senão usa filter
+  filter          Json? // árvore booleana de condições (null quando audienceAll)
+  status          String    @default("DRAFT")
+  sendAt          DateTime? // null = rascunho sem horário; setado = agendado/imediato
+  startedAt       DateTime?
+  sentAt          DateTime?
+  totalRecipients Int? // snapshot do público no disparo
+  deliveredCount  Int       @default(0)
+  createdById     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status, sendAt])
+  @@map("notification_campaigns")
+}
+
 // A team a user follows to get match reminders (~1h before kickoff). The pair is
 // unique so following is idempotent; both sides cascade so removing a user/team
 // cleans up the follows.
