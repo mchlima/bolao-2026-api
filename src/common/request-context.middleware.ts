@@ -7,14 +7,12 @@ function header(req: Request, name: string): string | null {
   return v ?? null;
 }
 
-// Cloudflare percent-encodes non-ASCII in cf-ipcity / cf-region (e.g. "São Paulo").
-function decode(s: string | null): string | null {
+// Cloudflare sends cf-ipcity / cf-region as raw UTF-8, but Node parses header
+// values as latin1 — so "São Paulo" arrives mangled as "SÃ£o Paulo". Reinterpret
+// the bytes as UTF-8 to recover the accented name (no-op for pure ASCII).
+function fromUtf8Header(s: string | null): string | null {
   if (!s) return null;
-  try {
-    return decodeURIComponent(s);
-  } catch {
-    return s;
-  }
+  return Buffer.from(s, 'latin1').toString('utf8');
 }
 
 /**
@@ -41,8 +39,8 @@ export function requestContextMiddleware(
       ip,
       userAgent: header(req, 'user-agent'),
       country: header(req, 'cf-ipcountry'),
-      region: decode(header(req, 'cf-region')),
-      city: decode(header(req, 'cf-ipcity')),
+      region: fromUtf8Header(header(req, 'cf-region')),
+      city: fromUtf8Header(header(req, 'cf-ipcity')),
     },
     () => next(),
   );
