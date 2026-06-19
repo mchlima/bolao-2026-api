@@ -11,16 +11,10 @@ export class TeamsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async findAll(query: QueryTeamsDto): Promise<Paginated<Team>> {
-    const { page, pageSize, search, type, continent, country, sort, hasLogo } =
+    const { page, pageSize, search, type, continent, country, sort, hasLogo, match } =
       query;
-    const where: Prisma.TeamWhereInput = {
-      ...(type && { type }),
-      ...(continent && { continent }),
-      ...(country && { country }),
-      ...(hasLogo === 'true' && { logoUrl: { not: null } }),
-      ...(hasLogo === 'false' && { logoUrl: null }),
-      ...(search && {
-        OR: [
+    const searchOr: Prisma.TeamWhereInput[] = search
+      ? [
           { name: { contains: search, mode: 'insensitive' } },
           { shortName: { contains: search, mode: 'insensitive' } },
           // ESPN code lives in externalIds.espn.code (uppercase); match it there.
@@ -30,9 +24,24 @@ export class TeamsService {
               string_contains: search.toUpperCase(),
             },
           },
-          { country: { contains: search, mode: 'insensitive' } },
-        ],
-      }),
+          // country only in the default 'all' scope (admin filtering) — 'name'
+          // keeps a by-name pick from being buried under every club of a country.
+          ...(match === 'name'
+            ? []
+            : [
+                {
+                  country: { contains: search, mode: 'insensitive' },
+                } as Prisma.TeamWhereInput,
+              ]),
+        ]
+      : [];
+    const where: Prisma.TeamWhereInput = {
+      ...(type && { type }),
+      ...(continent && { continent }),
+      ...(country && { country }),
+      ...(hasLogo === 'true' && { logoUrl: { not: null } }),
+      ...(hasLogo === 'false' && { logoUrl: null }),
+      ...(searchOr.length ? { OR: searchOr } : {}),
     };
 
     const orderBy: Prisma.TeamOrderByWithRelationInput[] =

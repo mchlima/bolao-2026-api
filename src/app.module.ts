@@ -29,6 +29,8 @@ import { AgendaModule } from './agenda/agenda.module';
 import { EventsModule } from './events/events.module';
 import { AlertsModule } from './alerts/alerts.module';
 import { MonitorModule } from './monitor/monitor.module';
+import { FollowsModule } from './follows/follows.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -53,6 +55,8 @@ import { MonitorModule } from './monitor/monitor.module';
     PredictionsModule,
     RankingsModule,
     PoolsModule,
+    FollowsModule,
+    NotificationsModule,
     AdminModule,
     LiveIngestModule,
     MatchWindowModule,

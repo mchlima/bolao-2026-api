@@ -150,7 +150,67 @@ model User {
   poolMemberships    PoolMember[]
   createdPoolInvites PoolInvite[]
 
+  followedTeams     FollowedTeam[]
+  notifications     Notification[]
+  pushSubscriptions PushSubscription[]
+
   @@map("users")
+}
+
+// A browser Web Push subscription (one per device/browser). endpoint is the
+// unique push service URL; p256dh/auth are the client keys web-push encrypts to.
+// Pruned automatically when the push service reports it gone (404/410).
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
+
+// An in-app notification (also delivered via Web Push when subscribed). v1 type
+// is MATCH_REMINDER (a followed team plays soon). Unique per (user, type, match)
+// so the reminder job is idempotent — re-runs never duplicate or re-alert.
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String // MATCH_REMINDER (more later)
+  title     String
+  body      String
+  matchId   String? // deep-link target + dedup key
+  url       String? // in-app path to open
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type, matchId])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+// A team a user follows to get match reminders (~1h before kickoff). The pair is
+// unique so following is idempotent; both sides cascade so removing a user/team
+// cleans up the follows.
+model FollowedTeam {
+  id        String   @id @default(cuid())
+  userId    String
+  teamId    String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, teamId])
+  @@index([teamId])
+  @@map("followed_teams")
 }
 
 // A Competition is the timeless tournament (e.g. "Copa do Mundo FIFA",
@@ -384,6 +444,7 @@ model Team {
   lineupEntries MatchLineupEntry[]
   events        MatchEvent[]
   stats         MatchStat[]
+  followers     FollowedTeam[]
 
   @@unique([sportId, countryCode])
   @@index([sportId])
