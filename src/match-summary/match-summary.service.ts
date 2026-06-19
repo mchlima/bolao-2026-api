@@ -555,7 +555,7 @@ export class MatchSummaryService {
           {
             title: `Escalação: ${match.homeTeam.shortName} x ${match.awayTeam.shortName}`,
             body: 'Saiu a escalação! Veja quem começa em campo.',
-            url: `/futebol/jogos/${match.id}/escalacao`,
+            url: `/futebol/agenda/${match.id}/escalacao`,
           },
         )
         .catch((e) =>
