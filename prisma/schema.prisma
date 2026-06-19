@@ -759,11 +759,20 @@ model AuditLog {
   entityType  String
   entityId    String?
   diff        Json? // { field: { before, after } }
+  // Request context (captured via AsyncLocalStorage middleware). The PII fields
+  // (ip/userAgent/region/city) are anonymized — set to NULL — after 180 days by
+  // AuditRetentionService; country (ISO-2) and the action itself are kept.
+  ip          String? // CF-Connecting-IP (real client IP, behind Cloudflare)
+  userAgent   String? // request User-Agent
+  country     String? // ISO-2 from CF-IPCountry (free on all plans, always present)
+  region      String? // state/region from CF; needs the "Add visitor location headers" managed transform
+  city        String? // city from CF; same managed transform requirement
   createdAt   DateTime       @default(now()) // immutable: no update/delete
 
   actor User? @relation("AuditActor", fields: [actorUserId], references: [id])
 
   @@index([entityType, entityId])
+  @@index([action])
   @@map("audit_logs")
 }
 

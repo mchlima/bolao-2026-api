@@ -6,11 +6,12 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { User } from '@prisma/client';
+import { AuditActorType, User } from '@prisma/client';
 import { compare, hash } from 'bcryptjs';
 import { UsersService } from '../users/users.service';
 import { StorageService } from '../storage/storage.service';
 import { SafeUser, toSafeUser } from '../users/user.types';
+import { AuditService, RecordAuditParams } from '../audit/audit.service';
 import { JwtPayload } from './auth.types';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -28,6 +29,7 @@ export class AuthService {
     private readonly users: UsersService,
     private readonly jwt: JwtService,
     private readonly storage: StorageService,
+    private readonly audit: AuditService,
   ) {}
 
   async register(dto: RegisterDto): Promise<AuthResponse> {
@@ -44,6 +46,12 @@ export class AuthService {
       email: dto.email,
       passwordHash,
     });
+    await this.safeAudit({
+      actorUserId: user.id,
+      action: 'AUTH_REGISTER',
+      entityType: 'User',
+      entityId: user.id,
+    });
     return this.buildResponse(user);
   }
 
@@ -55,18 +63,49 @@ export class AuthService {
 
     // Same error for "no such user" and "wrong password" — avoid user enumeration.
     if (!user || !passwordOk) {
+      await this.safeAudit({
+        actorUserId: user?.id ?? null,
+        actorType: AuditActorType.SYSTEM,
+        action: 'AUTH_LOGIN_FAILED',
+        entityType: 'User',
+        entityId: user?.id,
+        diff: { email: dto.email, reason: 'INVALID_CREDENTIALS' },
+      });
       throw new UnauthorizedException({
         code: 'INVALID_CREDENTIALS',
         message: 'E-mail ou senha inválidos.',
       });
     }
     if (!user.isActive) {
+      await this.safeAudit({
+        actorUserId: user.id,
+        actorType: AuditActorType.SYSTEM,
+        action: 'AUTH_LOGIN_FAILED',
+        entityType: 'User',
+        entityId: user.id,
+        diff: { email: dto.email, reason: 'USER_INACTIVE' },
+      });
       throw new ForbiddenException({
         code: 'USER_INACTIVE',
         message: 'Usuário desativado.',
       });
     }
+    await this.safeAudit({
+      actorUserId: user.id,
+      action: 'AUTH_LOGIN',
+      entityType: 'User',
+      entityId: user.id,
+    });
     return this.buildResponse(user);
+  }
+
+  /** Audit must never break auth — swallow any logging failure. */
+  private async safeAudit(params: RecordAuditParams): Promise<void> {
+    try {
+      await this.audit.record(params);
+    } catch {
+      // best-effort: a failed audit insert must not block login/registration
+    }
   }
 
   async updateMe(
