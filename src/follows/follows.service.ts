@@ -36,4 +36,33 @@ export class FollowsService {
   async unfollow(userId: string, teamId: string): Promise<void> {
     await this.prisma.followedTeam.deleteMany({ where: { userId, teamId } });
   }
+
+  /** Match ids the user opted into explicitly (independent of team follows). */
+  async listMatchIds(userId: string): Promise<string[]> {
+    const rows = await this.prisma.followedMatch.findMany({
+      where: { userId },
+      select: { matchId: true },
+    });
+    return rows.map((r) => r.matchId);
+  }
+
+  /** Opt into a specific match. Idempotent — re-following is a no-op. */
+  async followMatch(userId: string, matchId: string): Promise<void> {
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      select: { id: true },
+    });
+    if (!match) {
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Partida não encontrada.' });
+    }
+    await this.prisma.followedMatch.upsert({
+      where: { userId_matchId: { userId, matchId } },
+      create: { userId, matchId },
+      update: {},
+    });
+  }
+
+  async unfollowMatch(userId: string, matchId: string): Promise<void> {
+    await this.prisma.followedMatch.deleteMany({ where: { userId, matchId } });
+  }
 }

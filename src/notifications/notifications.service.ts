@@ -86,4 +86,46 @@ export class NotificationsService {
     }
     return fresh;
   }
+
+  /**
+   * Like createMissing, but each user gets their OWN payload — for notifications
+   * whose text is personal (e.g. a full-time result with the user's own points).
+   * Still idempotent per (type, matchId, user); returns the freshly-notified ids.
+   */
+  async createMissingPerUser(
+    type: string,
+    matchId: string,
+    entries: { userId: string; payload: NotificationPayload }[],
+  ): Promise<string[]> {
+    if (!entries.length) return [];
+    const userIds = entries.map((e) => e.userId);
+    const existing = await this.prisma.notification.findMany({
+      where: { type, matchId, userId: { in: userIds } },
+      select: { userId: true },
+    });
+    const have = new Set(existing.map((e) => e.userId));
+    const fresh = entries.filter((e) => !have.has(e.userId));
+    if (!fresh.length) return [];
+
+    await this.prisma.notification.createMany({
+      data: fresh.map((e) => ({
+        userId: e.userId,
+        type,
+        matchId,
+        title: e.payload.title,
+        body: e.payload.body,
+        url: e.payload.url ?? null,
+      })),
+      skipDuplicates: true,
+    });
+    for (const e of fresh) {
+      this.events.emit(`user:${e.userId}`); // live in-app badge
+      void this.push.sendToUser(e.userId, {
+        title: e.payload.title,
+        body: e.payload.body,
+        url: e.payload.url,
+      }); // web push
+    }
+    return fresh.map((e) => e.userId);
+  }
 }

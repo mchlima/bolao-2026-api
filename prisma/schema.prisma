@@ -151,6 +151,7 @@ model User {
   createdPoolInvites PoolInvite[]
 
   followedTeams     FollowedTeam[]
+  followedMatches   FollowedMatch[]
   notifications     Notification[]
   pushSubscriptions PushSubscription[]
 
@@ -211,6 +212,23 @@ model FollowedTeam {
   @@unique([userId, teamId])
   @@index([teamId])
   @@map("followed_teams")
+}
+
+// A specific match a user opted into for reminders/score, regardless of whether
+// they follow either team. Union'd with FollowedTeam when fanning out match
+// notifications. Unique pair = idempotent; both sides cascade.
+model FollowedMatch {
+  id        String   @id @default(cuid())
+  userId    String
+  matchId   String
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  match Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, matchId])
+  @@index([matchId])
+  @@map("followed_matches")
 }
 
 // A Competition is the timeless tournament (e.g. "Copa do Mundo FIFA",
@@ -648,6 +666,7 @@ model Match {
   lineupEntries MatchLineupEntry[]
   events        MatchEvent[]
   stats         MatchStat[]
+  followers     FollowedMatch[]
 
   @@unique([seasonId, matchNumber]) // idempotent fixture seeding
   @@index([seasonId])

@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ScoringService } from '../scoring/scoring.service';
+import { PhaseWeightService } from '../scoring/phase-weight.service';
 import { NotificationsService } from './notifications.service';
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -24,6 +26,9 @@ type ReminderMatch = Prisma.MatchGetPayload<{ select: typeof MATCH_SELECT }>;
  *  - MATCH_REMINDER_1D: between 1h and 24h before kickoff (day-ahead heads-up)
  *  - MATCH_REMINDER_1H: the final hour before kickoff
  *  - MATCH_STARTED: when the match goes live (kickoff)
+ *
+ * Plus a full-time result (MATCH_FINISHED) sent ONLY to users who predicted the
+ * match, with each user's own points — see notifyFinished.
  */
 @Injectable()
 export class ReminderService {
@@ -32,6 +37,8 @@ export class ReminderService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly scoring: ScoringService,
+    private readonly phaseWeight: PhaseWeightService,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -50,6 +57,7 @@ export class ReminderService {
         'Começa daqui a pouco — não esqueça o seu palpite!',
       );
       await this.notifyStarted();
+      await this.notifyFinished();
     } catch (err) {
       this.logger.error(`Falha no tick de lembretes: ${(err as Error).message}`);
     }
@@ -86,16 +94,83 @@ export class ReminderService {
     await this.fanOut(matches, 'MATCH_STARTED', 'Bola rolando! Acompanhe ao vivo.');
   }
 
-  /** Notify everyone who follows either side of each match (idempotent per type). */
+  /**
+   * Full-time: a match just finished. Unlike the reminders (which target team
+   * followers), this goes ONLY to users who predicted the match, and each gets a
+   * personal body with their own points. Idempotent per user+match, and bounded
+   * to recently-finished matches so a deploy never back-blasts old results.
+   */
+  private async notifyFinished(): Promise<void> {
+    const now = Date.now();
+    const matches = await this.prisma.match.findMany({
+      where: {
+        status: 'FINISHED',
+        // only games that finished recently (kickoff in the last 6h) — avoids
+        // alerting historical results when the feature first ships
+        kickoffAt: { gte: new Date(now - 6 * HOUR_MS) },
+        homeTeamId: { not: null },
+        awayTeamId: { not: null },
+      },
+      select: {
+        id: true,
+        seasonId: true,
+        roundId: true,
+        homeScore: true,
+        awayScore: true,
+        homeTeam: { select: { name: true, shortName: true } },
+        awayTeam: { select: { name: true, shortName: true } },
+      },
+    });
+    if (!matches.length) return;
+
+    const seasonIds = [...new Set(matches.map((m) => m.seasonId))];
+    const weightByRound = await this.phaseWeight.byRound(seasonIds);
+
+    for (const m of matches) {
+      const predictions = await this.prisma.prediction.findMany({
+        where: { matchId: m.id },
+        select: { userId: true, homeScore: true, awayScore: true },
+      });
+      if (!predictions.length) continue;
+
+      const home = m.homeTeam?.name || m.homeTeam?.shortName || 'Casa';
+      const away = m.awayTeam?.name || m.awayTeam?.shortName || 'Fora';
+      const weight = (m.roundId && weightByRound.get(m.roundId)) || 1;
+      const result = `${home} ${m.homeScore} x ${m.awayScore} ${away}`;
+      const title = `Fim de jogo: ${home} x ${away}`;
+      const url = `/futebol/torneios/${m.seasonId}/matches/${m.id}`;
+
+      const entries = predictions.map((p) => {
+        const { points } = this.scoring.score(
+          { home: p.homeScore, away: p.awayScore },
+          { home: m.homeScore, away: m.awayScore },
+          weight,
+        );
+        const palpite = `${p.homeScore} x ${p.awayScore}`;
+        const body =
+          points === 0
+            ? `${result}. Seu palpite (${palpite}) não pontuou desta vez.`
+            : `${result}. Seu palpite (${palpite}) valeu ${points} ${points === 1 ? 'ponto' : 'pontos'}!`;
+        return { userId: p.userId, payload: { title, body, url } };
+      });
+
+      const fresh = await this.notifications.createMissingPerUser(
+        'MATCH_FINISHED',
+        m.id,
+        entries,
+      );
+      if (fresh.length) {
+        this.logger.log(`MATCH_FINISHED ${home} x ${away}: ${fresh.length} palpiteiro(s).`);
+      }
+    }
+  }
+
+  /** Notify everyone who follows either side OR the match itself (idempotent per type). */
   private async fanOut(matches: ReminderMatch[], type: string, body: string): Promise<void> {
     if (!matches.length) return;
     for (const m of matches) {
-      const followers = await this.prisma.followedTeam.findMany({
-        where: { teamId: { in: [m.homeTeamId!, m.awayTeamId!] } },
-        select: { userId: true },
-        distinct: ['userId'], // following both sides → one notification
-      });
-      if (!followers.length) continue;
+      const userIds = await this.audienceFor(m.id, m.homeTeamId!, m.awayTeamId!);
+      if (!userIds.length) continue;
 
       const home = m.homeTeam?.name || m.homeTeam?.shortName || 'Casa';
       const away = m.awayTeam?.name || m.awayTeam?.shortName || 'Fora';
@@ -103,11 +178,39 @@ export class ReminderService {
         type,
         m.id,
         { title: `${home} x ${away}`, body, url: `/futebol/torneios/${m.seasonId}/matches/${m.id}` },
-        followers.map((f) => f.userId),
+        userIds,
       );
       if (fresh.length) {
         this.logger.log(`${type} ${home} x ${away}: ${fresh.length} usuário(s).`);
       }
     }
+  }
+
+  /**
+   * Who to notify about a match: everyone who follows either team, UNION everyone
+   * who opted into this specific match (FollowedMatch) — deduplicated.
+   */
+  private async audienceFor(
+    matchId: string,
+    homeTeamId: string,
+    awayTeamId: string,
+  ): Promise<string[]> {
+    const [teamFollowers, matchFollowers] = await Promise.all([
+      this.prisma.followedTeam.findMany({
+        where: { teamId: { in: [homeTeamId, awayTeamId] } },
+        select: { userId: true },
+        distinct: ['userId'],
+      }),
+      this.prisma.followedMatch.findMany({
+        where: { matchId },
+        select: { userId: true },
+      }),
+    ]);
+    return [
+      ...new Set([
+        ...teamFollowers.map((f) => f.userId),
+        ...matchFollowers.map((f) => f.userId),
+      ]),
+    ];
   }
 }
