@@ -64,6 +64,56 @@ export class UsersService {
     return this.prisma.user.create({ data });
   }
 
+  // ─────────────── Social login (OAuth) ───────────────
+
+  /** The user linked to a given provider identity, or null. */
+  findByOAuth(provider: string, providerAccountId: string): Promise<User | null> {
+    return this.prisma.user.findFirst({
+      where: { oauthAccounts: { some: { provider, providerAccountId } } },
+    });
+  }
+
+  /** Create a passwordless user already linked to a provider identity. */
+  createWithOAuth(data: {
+    name: string;
+    email: string;
+    avatarUrl: string | null;
+    provider: string;
+    providerAccountId: string;
+    providerEmail: string | null;
+  }): Promise<User> {
+    return this.prisma.user.create({
+      data: {
+        name: data.name,
+        email: data.email,
+        avatarUrl: data.avatarUrl,
+        oauthAccounts: {
+          create: {
+            provider: data.provider,
+            providerAccountId: data.providerAccountId,
+            email: data.providerEmail,
+          },
+        },
+      },
+    });
+  }
+
+  /** Attach a provider identity to an existing user. */
+  async linkOAuth(
+    userId: string,
+    data: { provider: string; providerAccountId: string; email: string | null },
+  ): Promise<void> {
+    await this.prisma.oAuthAccount.create({ data: { userId, ...data } });
+  }
+
+  /** Which third-party identities the user has linked (drives the profile UI). */
+  async getConnections(userId: string): Promise<{ google: boolean }> {
+    const google = await this.prisma.oAuthAccount.count({
+      where: { userId, provider: 'google' },
+    });
+    return { google: google > 0 };
+  }
+
   // ─────────────── Admin ───────────────
 
   async findAllPaginated(

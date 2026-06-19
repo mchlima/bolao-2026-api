@@ -12,10 +12,15 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { AuthResponse, AuthService } from './auth.service';
+import {
+  AccountConnections,
+  AuthResponse,
+  AuthService,
+} from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { GoogleAuthDto } from './dto/google-auth.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import type { SafeUser } from '../users/user.types';
@@ -33,6 +38,31 @@ export class AuthController {
   @HttpCode(200)
   login(@Body() dto: LoginDto): Promise<AuthResponse> {
     return this.auth.login(dto);
+  }
+
+  /** Login or signup with Google (find-or-create). */
+  @Post('google')
+  @HttpCode(200)
+  google(@Body() dto: GoogleAuthDto): Promise<AuthResponse> {
+    return this.auth.loginWithGoogle(dto);
+  }
+
+  /** Link a Google identity to the authenticated account. */
+  @Post('google/link')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  linkGoogle(
+    @CurrentUser() user: SafeUser,
+    @Body() dto: GoogleAuthDto,
+  ): Promise<AccountConnections> {
+    return this.auth.linkGoogle(user.id, dto);
+  }
+
+  /** Which third-party identities the user has linked. */
+  @Get('connections')
+  @UseGuards(JwtAuthGuard)
+  connections(@CurrentUser() user: SafeUser): Promise<AccountConnections> {
+    return this.auth.getConnections(user.id);
   }
 
   @Get('me')

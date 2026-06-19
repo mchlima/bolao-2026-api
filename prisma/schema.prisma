@@ -155,8 +155,27 @@ model User {
   notifications          Notification[]
   scheduledNotifications ScheduledNotification[]
   pushSubscriptions      PushSubscription[]
+  oauthAccounts          OAuthAccount[]
 
   @@map("users")
+}
+
+// A linked third-party identity (Google for now). One row per (provider,
+// account); a user may have several. passwordHash on User can be null when the
+// account was created purely via social login.
+model OAuthAccount {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          String // "google"
+  providerAccountId String // provider's stable user id (Google "sub")
+  email             String? // email reported by the provider at link time (informational)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("oauth_accounts")
 }
 
 // A browser Web Push subscription (one per device/browser). endpoint is the

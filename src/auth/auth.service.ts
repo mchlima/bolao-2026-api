@@ -15,12 +15,18 @@ import { AuditService, RecordAuditParams } from '../audit/audit.service';
 import { JwtPayload } from './auth.types';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { GoogleAuthDto } from './dto/google-auth.dto';
+import { GoogleVerifier } from './google-verifier';
 
 const BCRYPT_ROUNDS = 10;
 
 export interface AuthResponse {
   accessToken: string;
   user: SafeUser;
+}
+
+export interface AccountConnections {
+  google: boolean;
 }
 
 @Injectable()
@@ -30,6 +36,7 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly storage: StorageService,
     private readonly audit: AuditService,
+    private readonly google: GoogleVerifier,
   ) {}
 
   async register(dto: RegisterDto): Promise<AuthResponse> {
@@ -97,6 +104,116 @@ export class AuthService {
       entityId: user.id,
     });
     return this.buildResponse(user);
+  }
+
+  /**
+   * Login OR signup with Google (one flow — Google doesn't distinguish them):
+   *   1. Already linked → log that user in.
+   *   2. Email matches an existing account → auto-link (Google verified the email)
+   *      and log in. If the email is NOT verified by Google, refuse and steer the
+   *      user to log in with their password and link from the profile.
+   *   3. Brand-new email → create a passwordless account linked to Google.
+   */
+  async loginWithGoogle(dto: GoogleAuthDto): Promise<AuthResponse> {
+    const profile = await this.google.verify(dto.idToken);
+
+    let user = await this.users.findByOAuth('google', profile.sub);
+    if (!user) {
+      const byEmail = await this.users.findByEmail(profile.email);
+      if (byEmail) {
+        if (!profile.emailVerified) {
+          throw new ConflictException({
+            code: 'EMAIL_TAKEN',
+            message:
+              'Já existe uma conta com este e-mail. Entre com a senha e vincule o Google no seu perfil.',
+          });
+        }
+        await this.users.linkOAuth(byEmail.id, {
+          provider: 'google',
+          providerAccountId: profile.sub,
+          email: profile.email,
+        });
+        user = byEmail;
+        await this.safeAudit({
+          actorUserId: user.id,
+          action: 'AUTH_GOOGLE_LINK',
+          entityType: 'User',
+          entityId: user.id,
+          diff: { via: 'login_auto' },
+        });
+      } else {
+        user = await this.users.createWithOAuth({
+          name: profile.name?.trim() || profile.email.split('@')[0],
+          email: profile.email,
+          avatarUrl: profile.picture,
+          provider: 'google',
+          providerAccountId: profile.sub,
+          providerEmail: profile.email,
+        });
+        await this.safeAudit({
+          actorUserId: user.id,
+          action: 'AUTH_GOOGLE_REGISTER',
+          entityType: 'User',
+          entityId: user.id,
+        });
+      }
+    }
+
+    if (!user.isActive) {
+      await this.safeAudit({
+        actorUserId: user.id,
+        actorType: AuditActorType.SYSTEM,
+        action: 'AUTH_LOGIN_FAILED',
+        entityType: 'User',
+        entityId: user.id,
+        diff: { email: profile.email, reason: 'USER_INACTIVE' },
+      });
+      throw new ForbiddenException({
+        code: 'USER_INACTIVE',
+        message: 'Usuário desativado.',
+      });
+    }
+
+    await this.safeAudit({
+      actorUserId: user.id,
+      action: 'AUTH_GOOGLE_LOGIN',
+      entityType: 'User',
+      entityId: user.id,
+    });
+    return this.buildResponse(user);
+  }
+
+  /** Link a Google identity to the currently authenticated user. */
+  async linkGoogle(
+    userId: string,
+    dto: GoogleAuthDto,
+  ): Promise<AccountConnections> {
+    const profile = await this.google.verify(dto.idToken);
+    const owner = await this.users.findByOAuth('google', profile.sub);
+    if (owner && owner.id !== userId) {
+      throw new ConflictException({
+        code: 'GOOGLE_ALREADY_LINKED',
+        message: 'Esta conta Google já está vinculada a outro usuário.',
+      });
+    }
+    if (!owner) {
+      await this.users.linkOAuth(userId, {
+        provider: 'google',
+        providerAccountId: profile.sub,
+        email: profile.email,
+      });
+      await this.safeAudit({
+        actorUserId: userId,
+        action: 'AUTH_GOOGLE_LINK',
+        entityType: 'User',
+        entityId: userId,
+      });
+    }
+    return this.users.getConnections(userId);
+  }
+
+  getConnections(userId: string): Promise<AccountConnections> {
+    return this.users.getConnections(userId);
   }
 
   /** Audit must never break auth — swallow any logging failure. */
