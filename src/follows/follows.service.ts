@@ -13,6 +13,17 @@ const UPCOMING_INCLUDE = {
 
 export type FollowedUpcomingMatch = Prisma.MatchGetPayload<{ include: typeof UPCOMING_INCLUDE }>;
 
+/** One followed team + its next (≤2) upcoming matches — for the grouped home view. */
+export interface FollowingTeamGroup {
+  team: Team;
+  matches: FollowedUpcomingMatch[];
+}
+export interface FollowingView {
+  teams: FollowingTeamGroup[];
+  others: FollowedUpcomingMatch[]; // followed-by-match games not in any team group
+  followedTeamCount: number; // all followed teams, even those with no upcoming game
+}
+
 /**
  * Teams a user follows to get a match reminder ~1h before kickoff. The follow set
  * is also read by the notifications reminder job to fan a match out to followers.
@@ -121,5 +132,69 @@ export class FollowsService {
       orderBy: { kickoffAt: 'asc' },
       take: 50,
     });
+  }
+
+  /**
+   * "Seus jogos" agrupado por time: para cada time seguido, os 2 próximos jogos
+   * (LIVE ou agendados no futuro), independente de data. Mais as partidas que o
+   * usuário segue avulso (que não caírem em nenhum grupo). `followedTeamCount`
+   * cobre todos os times seguidos (mesmo os sem jogo) p/ o estado vazio da home.
+   */
+  async listFollowing(userId: string): Promise<FollowingView> {
+    const [teamRows, matchFollows] = await Promise.all([
+      this.prisma.followedTeam.findMany({
+        where: { userId },
+        include: { team: true },
+        orderBy: { createdAt: 'asc' },
+      }),
+      this.prisma.followedMatch.findMany({ where: { userId }, select: { matchId: true } }),
+    ]);
+    const teams = teamRows.map((r) => r.team);
+    const matchIds = matchFollows.map((m) => m.matchId);
+    const followedTeamCount = teams.length;
+    if (!teams.length && !matchIds.length) return { teams: [], others: [], followedTeamCount };
+
+    // LIVE agora, ou agendado no futuro — sem teto de data (next 2 por time).
+    const now = new Date();
+    const upcomingOr: Prisma.MatchWhereInput['OR'] = [
+      { status: 'LIVE' },
+      { status: 'SCHEDULED', kickoffAt: { gt: now } },
+    ];
+
+    const perTeam = await Promise.all(
+      teams.map(async (team) => ({
+        team,
+        matches: await this.prisma.match.findMany({
+          where: {
+            AND: [
+              { OR: upcomingOr },
+              { OR: [{ homeTeamId: team.id }, { awayTeamId: team.id }] },
+            ],
+          },
+          include: UPCOMING_INCLUDE,
+          orderBy: { kickoffAt: 'asc' },
+          take: 2,
+        }),
+      })),
+    );
+
+    // Só times com jogo, ordenados pelo próximo kickoff (quem joga antes primeiro).
+    const groups = perTeam
+      .filter((g) => g.matches.length > 0)
+      .sort((a, b) => a.matches[0].kickoffAt.getTime() - b.matches[0].kickoffAt.getTime());
+
+    // Partidas seguidas avulsas que ainda não apareceram em nenhum grupo de time.
+    const shown = new Set(groups.flatMap((g) => g.matches.map((m) => m.id)));
+    let others: FollowedUpcomingMatch[] = [];
+    if (matchIds.length) {
+      const followed = await this.prisma.match.findMany({
+        where: { AND: [{ OR: upcomingOr }, { id: { in: matchIds } }] },
+        include: UPCOMING_INCLUDE,
+        orderBy: { kickoffAt: 'asc' },
+      });
+      others = followed.filter((m) => !shown.has(m.id));
+    }
+
+    return { teams: groups, others, followedTeamCount };
   }
 }

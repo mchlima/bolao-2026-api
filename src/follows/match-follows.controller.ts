@@ -2,7 +2,7 @@ import { Controller, Delete, Get, HttpCode, Param, Put, UseGuards } from '@nestj
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { SafeUser } from '../users/user.types';
-import { FollowsService, type FollowedUpcomingMatch } from './follows.service';
+import { FollowsService, type FollowedUpcomingMatch, type FollowingView } from './follows.service';
 
 // Per-match notification opt-in: a user can follow a single match (reminders +
 // final score) regardless of whether they follow either team. The reminder job
@@ -22,6 +22,12 @@ export class MatchFollowsController {
   @Get('upcoming')
   upcoming(@CurrentUser() user: SafeUser): Promise<FollowedUpcomingMatch[]> {
     return this.follows.listUpcoming(user.id);
+  }
+
+  /** "Seus jogos" grouped by team: each followed team's next 2 games + followed matches. */
+  @Get('following')
+  following(@CurrentUser() user: SafeUser): Promise<FollowingView> {
+    return this.follows.listFollowing(user.id);
   }
 
   @Put(':matchId')
