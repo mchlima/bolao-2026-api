@@ -15,6 +15,7 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Paginated } from '../common/pagination';
+import { NotificationsService } from '../notifications/notifications.service';
 import { ScheduledNotificationService } from '../notifications/scheduled-notification.service';
 import type { SafeUser } from './user.types';
 import { QueryUsersDto } from './dto/query-users.dto';
@@ -30,6 +31,7 @@ export class AdminUsersController {
   constructor(
     private readonly users: UsersService,
     private readonly scheduled: ScheduledNotificationService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   @Get()
@@ -69,8 +71,9 @@ export class AdminUsersController {
   }
 
   /**
-   * Send a custom notification to a user — now or scheduled. sendAt absent or in
-   * the past = "agora" (delivered on the next minute tick of the robot).
+   * Send a custom notification to a user. sendAt absent or in the past = "agora":
+   * delivered immediately (in-app + push). A future sendAt is stored and the
+   * minute cron delivers it then.
    */
   @Post(':id/notifications')
   @HttpCode(201)
@@ -83,17 +86,17 @@ export class AdminUsersController {
     const now = Date.now();
     const requested = dto.sendAt ? new Date(dto.sendAt).getTime() : now;
     const immediate = requested <= now;
-    const sendAt = new Date(immediate ? now : requested);
-    const row = await this.scheduled.schedule(
-      id,
-      {
-        title: dto.title.trim(),
-        body: dto.body.trim(),
-        url: dto.url?.trim() || null,
-        sendAt,
-      },
-      admin.id,
-    );
-    return { sendAt: row.sendAt.toISOString(), immediate };
+    const payload = {
+      title: dto.title.trim(),
+      body: dto.body.trim(),
+      url: dto.url?.trim() || null,
+    };
+
+    if (immediate) {
+      await this.notifications.deliver(id, payload); // dispara na hora
+      return { sendAt: new Date(now).toISOString(), immediate: true };
+    }
+    const row = await this.scheduled.schedule(id, { ...payload, sendAt: new Date(requested) }, admin.id);
+    return { sendAt: row.sendAt.toISOString(), immediate: false };
   }
 }
