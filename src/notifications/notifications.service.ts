@@ -88,6 +88,36 @@ export class NotificationsService {
   }
 
   /**
+   * Fan a match notification out to everyone who follows the match itself or
+   * either of its teams (deduped union — same audience as the match reminders).
+   * Idempotent per (user, type, matchId) via createMissing.
+   */
+  async notifyMatchFollowers(
+    type: string,
+    match: { id: string; homeTeamId: string; awayTeamId: string },
+    payload: NotificationPayload,
+  ): Promise<string[]> {
+    const [teamFollowers, matchFollowers] = await Promise.all([
+      this.prisma.followedTeam.findMany({
+        where: { teamId: { in: [match.homeTeamId, match.awayTeamId] } },
+        select: { userId: true },
+        distinct: ['userId'],
+      }),
+      this.prisma.followedMatch.findMany({
+        where: { matchId: match.id },
+        select: { userId: true },
+      }),
+    ]);
+    const userIds = [
+      ...new Set([
+        ...teamFollowers.map((f) => f.userId),
+        ...matchFollowers.map((f) => f.userId),
+      ]),
+    ];
+    return this.createMissing(type, match.id, payload, userIds);
+  }
+
+  /**
    * Deliver a one-off notification to a single user (no type/match dedup) — used
    * for admin-authored custom messages. Writes the in-app row, pings the user's
    * SSE room and fires a web push.

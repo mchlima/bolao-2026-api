@@ -19,9 +19,12 @@ import { AlertsService } from '../alerts/alerts.service';
 import { EventsService } from '../events/events.service';
 import { MonitorService } from '../monitor/monitor.service';
 import { MatchSummaryService } from '../match-summary/match-summary.service';
+import type { NotificationsService } from '../notifications/notifications.service';
 import { SlotResolverService } from '../structure/slot-resolver.service';
 import { StandingsService } from '../structure/standings.service';
 
+// Backfill of FINISHED matches never delivers notifications — pass a no-op.
+const NO_NOTIFY = { notifyMatchFollowers: async () => [] } as unknown as NotificationsService;
 const PACING_MS = 1500; // gap between matches — be gentle on ESPN's public API
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -36,6 +39,7 @@ async function main(): Promise<void> {
     events,
     new MonitorService(prisma, new AlertsService()),
     new SlotResolverService(prisma, new StandingsService(prisma)),
+    NO_NOTIFY,
   );
 
   const matches = await prisma.match.findMany({

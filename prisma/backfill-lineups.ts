@@ -13,8 +13,12 @@ import { AlertsService } from '../src/alerts/alerts.service';
 import { EventsService } from '../src/events/events.service';
 import { MonitorService } from '../src/monitor/monitor.service';
 import { MatchSummaryService } from '../src/match-summary/match-summary.service';
+import type { NotificationsService } from '../src/notifications/notifications.service';
 import { SlotResolverService } from '../src/structure/slot-resolver.service';
 import { StandingsService } from '../src/structure/standings.service';
+
+// Historical lineup backfill never delivers notifications — pass a no-op.
+const NO_NOTIFY = { notifyMatchFollowers: async () => [] } as unknown as NotificationsService;
 
 for (const line of readFileSync(join(__dirname, '..', '.env'), 'utf8').split(
   '\n',
@@ -34,6 +38,7 @@ async function main() {
     new EventsService(),
     new MonitorService(prisma, new AlertsService()),
     new SlotResolverService(prisma, new StandingsService(prisma)),
+    NO_NOTIFY,
   );
 
   // Matches that have been played and carry an ESPN event id.

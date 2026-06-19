@@ -15,6 +15,7 @@ import {
 import { scoreboardDates } from '../live-ingest/live-ingest.service';
 import { raiseStatus, resumedClock } from './live-merge';
 import { SlotResolverService } from '../structure/slot-resolver.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   espnCode,
   espnExternalId,
@@ -78,6 +79,7 @@ export class MatchSummaryService {
     private readonly events: EventsService,
     private readonly monitor: MonitorService,
     private readonly resolver: SlotResolverService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   @Cron(TICK_CRON)
@@ -240,6 +242,7 @@ export class MatchSummaryService {
     let statusChanged = false;
     let cardsChanged = false;
     let lineupChanged = false;
+    let lineupJustAppeared = false; // 0 → N entries: the lineup was first published
     let eventsChanged = false;
 
     if (eventId && !storedId)
@@ -353,6 +356,7 @@ export class MatchSummaryService {
         }
       }
       lineupChanged = written > 0 && sig(written_) !== beforeSig;
+      lineupJustAppeared = before.length === 0 && written_.length > 0;
     }
 
     // ---------- Merge (display): status / score / clock / cards ----------
@@ -534,6 +538,29 @@ export class MatchSummaryService {
       )
         rooms.push(`tournament:${match.seasonId}`);
       this.events.emit(...rooms);
+    }
+
+    // Lineup just dropped (0 → N) — alert everyone following the match or a team,
+    // deep-linking to the match's lineup tab. Idempotent per (user, type, match),
+    // so a later lineup edit (subs/cards) never re-alerts. Guarded to matches
+    // around kickoff (lineups land ~1h before) so a historical re-ingest/backfill
+    // can't blast alerts for old games. Fire-and-forget: a notification hiccup
+    // must never break ingestion.
+    const lineupFresh = match.kickoffAt.getTime() > Date.now() - 3 * 60 * 60 * 1000;
+    if (lineupJustAppeared && lineupFresh && match.homeTeam && match.awayTeam) {
+      void this.notifications
+        .notifyMatchFollowers(
+          'MATCH_LINEUP_PUBLISHED',
+          { id: match.id, homeTeamId: match.homeTeamId, awayTeamId: match.awayTeamId },
+          {
+            title: `Escalação: ${match.homeTeam.shortName} x ${match.awayTeam.shortName}`,
+            body: 'Saiu a escalação! Veja quem começa em campo.',
+            url: `/futebol/jogos/${match.id}/escalacao`,
+          },
+        )
+        .catch((e) =>
+          this.logger.warn(`lineup notify falhou (${matchId}): ${(e as Error).message}`),
+        );
     }
     return written;
   }

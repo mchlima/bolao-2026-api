@@ -9,8 +9,12 @@ import { AlertsService } from '../alerts/alerts.service';
 import { EventsService } from '../events/events.service';
 import { MonitorService } from '../monitor/monitor.service';
 import { MatchSummaryService } from '../match-summary/match-summary.service';
+import type { NotificationsService } from '../notifications/notifications.service';
 import { SlotResolverService } from '../structure/slot-resolver.service';
 import { StandingsService } from '../structure/standings.service';
+
+// Backfill/dev scripts never deliver notifications — pass a no-op.
+const NO_NOTIFY = { notifyMatchFollowers: async () => [] } as unknown as NotificationsService;
 
 async function main(): Promise<void> {
   const matchId = process.argv[2];
@@ -24,6 +28,7 @@ async function main(): Promise<void> {
     events,
     new MonitorService(prisma, new AlertsService()),
     new SlotResolverService(prisma, new StandingsService(prisma)),
+    NO_NOTIFY,
   );
   await summary.ingest(matchId);
   const byType = await prisma.matchEvent.groupBy({
