@@ -32,6 +32,7 @@ import { MonitorModule } from './monitor/monitor.module';
 import { FollowsModule } from './follows/follows.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
+import { StandingsModule } from './standings/standings.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { CampaignsModule } from './campaigns/campaigns.module';
     FollowsModule,
     NotificationsModule,
     CampaignsModule,
+    StandingsModule,
     AdminModule,
     LiveIngestModule,
     MatchWindowModule,
