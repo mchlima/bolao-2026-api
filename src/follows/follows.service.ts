@@ -1,6 +1,17 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Team } from '@prisma/client';
+import { Prisma, Team } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+
+// Relations the home "Seus jogos" card needs (same shape the agenda serves).
+const UPCOMING_INCLUDE = {
+  homeTeam: true,
+  awayTeam: true,
+  season: { select: { id: true, name: true, status: true } },
+  round: { select: { number: true, name: true } },
+  stadium: true,
+} satisfies Prisma.MatchInclude;
+
+export type FollowedUpcomingMatch = Prisma.MatchGetPayload<{ include: typeof UPCOMING_INCLUDE }>;
 
 /**
  * Teams a user follows to get a match reminder ~1h before kickoff. The follow set
@@ -64,5 +75,37 @@ export class FollowsService {
 
   async unfollowMatch(userId: string, matchId: string): Promise<void> {
     await this.prisma.followedMatch.deleteMany({ where: { userId, matchId } });
+  }
+
+  /**
+   * Upcoming matches the user follows — either the match itself or one of its
+   * teams. Bounded to the next 8 days (enough to cover the rest of any Mon–Sun
+   * week; the caller trims to the current week in the user's timezone) so the
+   * payload stays small. Includes the relations the home card renders.
+   */
+  async listUpcoming(userId: string): Promise<FollowedUpcomingMatch[]> {
+    const [teams, matchFollows] = await Promise.all([
+      this.prisma.followedTeam.findMany({ where: { userId }, select: { teamId: true } }),
+      this.prisma.followedMatch.findMany({ where: { userId }, select: { matchId: true } }),
+    ]);
+    const teamIds = teams.map((t) => t.teamId);
+    const matchIds = matchFollows.map((m) => m.matchId);
+    if (!teamIds.length && !matchIds.length) return [];
+
+    const now = Date.now();
+    return this.prisma.match.findMany({
+      where: {
+        status: 'SCHEDULED',
+        kickoffAt: { gt: new Date(now), lte: new Date(now + 8 * 24 * 60 * 60 * 1000) },
+        OR: [
+          { id: { in: matchIds } },
+          { homeTeamId: { in: teamIds } },
+          { awayTeamId: { in: teamIds } },
+        ],
+      },
+      include: UPCOMING_INCLUDE,
+      orderBy: { kickoffAt: 'asc' },
+      take: 50,
+    });
   }
 }
