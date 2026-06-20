@@ -375,7 +375,7 @@ model Season {
   winnerTeam  Team?       @relation("SeasonWinner", fields: [winnerTeamId], references: [id])
   stages      Stage[]
   matches     Match[]
-  pools       Pool[]
+  poolRuns    PoolRun[]
 
   @@index([competitionId])
   @@map("seasons")
@@ -795,28 +795,57 @@ model AuditLog {
   @@map("audit_logs")
 }
 
-// A pool ("bolão") = one Season from the global catalog + a group of members.
-// Predictions stay global (Prediction is unchanged); the pool only scopes rankings
-// to its members. Created over an existing season — users never create seasons.
+// A pool ("bolão") = a durable group of members. It hosts one or more "seasons"
+// (PoolRun): each run targets a Season and counts points within its own window
+// (kickoffAt > startAt). Predictions stay global (Prediction is unchanged); the
+// pool only scopes rankings to its members, and the run scopes them in time.
 model Pool {
   id                String         @id @default(cuid())
   name              String
   description       String? // internal — shown to members inside the pool
   inviteDescription String? // shown on the invite-accept page (public via link)
-  seasonId          String
   ownerId           String
   visibility        PoolVisibility @default(PRIVATE)
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
-  season  Season       @relation(fields: [seasonId], references: [id])
   owner   User         @relation("PoolOwner", fields: [ownerId], references: [id])
   members PoolMember[]
   invites PoolInvite[]
+  runs    PoolRun[]
 
-  @@index([seasonId])
   @@index([ownerId])
   @@map("pools")
+}
+
+// A "temporada" of a pool: one Season disputed in a time window. DRAFT until the
+// owner starts it (startAt stamped); ACTIVE while running; ENDED once closed
+// (endAt stamped). At most one open run (endAt = null) per pool. Points count for
+// matches with kickoffAt > startAt (and <= endAt when set) — see RankingsService.
+model PoolRun {
+  id        String        @id @default(cuid())
+  poolId    String
+  seasonId  String
+  label     String? // "Temporada 1" (auto) or a custom name
+  status    PoolRunStatus @default(DRAFT)
+  startAt   DateTime? // stamped when the owner starts the run
+  endAt     DateTime? // stamped when the run is closed
+  order     Int // 1, 2, 3… within the pool
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  pool   Pool   @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  season Season @relation(fields: [seasonId], references: [id])
+
+  @@index([poolId])
+  @@index([seasonId])
+  @@map("pool_runs")
+}
+
+enum PoolRunStatus {
+  DRAFT
+  ACTIVE
+  ENDED
 }
 
 model PoolMember {

@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, PoolMember, PoolMemberRole } from '@prisma/client';
+import { Prisma, PoolMember, PoolMemberRole, PoolRun } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   MatchRankingResponse,
@@ -14,6 +14,7 @@ import {
 } from '../rankings/rankings.service';
 import { CreateInviteDto } from './dto/create-invite.dto';
 import { CreatePoolDto } from './dto/create-pool.dto';
+import { CreateRunDto } from './dto/create-run.dto';
 import { UpdateInviteDto } from './dto/update-invite.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { UpdatePoolDto } from './dto/update-pool.dto';
@@ -22,6 +23,8 @@ import {
   PoolDetail,
   PoolInviteView,
   PoolMatchPredictionsView,
+  PoolRunView,
+  PoolRunWithChampion,
   PoolSummary,
 } from './pool.types';
 
@@ -58,10 +61,19 @@ export class PoolsService {
         name: dto.name,
         description: dto.description ?? null,
         inviteDescription: dto.inviteDescription ?? null,
-        seasonId: dto.seasonId,
         ownerId: userId,
         visibility: dto.visibility ?? 'PRIVATE',
         members: { create: { userId, role: 'OWNER' } },
+        // The pool always opens with its first temporada (DRAFT until started,
+        // or ACTIVE right away when the owner ticks "iniciar já").
+        runs: {
+          create: {
+            seasonId: dto.seasonId,
+            label: 'Temporada 1',
+            order: 1,
+            ...(dto.start && { status: 'ACTIVE', startAt: new Date() }),
+          },
+        },
       },
       select: { id: true },
     });
@@ -75,7 +87,7 @@ export class PoolsService {
       include: {
         pool: {
           include: {
-            season: { select: TOURNAMENT_SELECT },
+            runs: { include: { season: { select: TOURNAMENT_SELECT } } },
             _count: { select: { members: true } },
           },
         },
@@ -83,17 +95,24 @@ export class PoolsService {
       orderBy: { joinedAt: 'desc' },
     });
 
-    return memberships.map((m) => ({
-      id: m.pool.id,
-      name: m.pool.name,
-      description: m.pool.description,
-      inviteDescription: m.pool.inviteDescription,
-      visibility: m.pool.visibility,
-      tournament: m.pool.season,
-      myRole: m.role,
-      memberCount: m.pool._count.members,
-      createdAt: m.pool.createdAt,
-    }));
+    return memberships
+      .map((m): PoolSummary | null => {
+        const run = this.pickCurrentRun(m.pool.runs);
+        if (!run) return null;
+        return {
+          id: m.pool.id,
+          name: m.pool.name,
+          description: m.pool.description,
+          inviteDescription: m.pool.inviteDescription,
+          visibility: m.pool.visibility,
+          tournament: run.season,
+          currentRun: this.runView(run),
+          myRole: m.role,
+          memberCount: m.pool._count.members,
+          createdAt: m.pool.createdAt,
+        };
+      })
+      .filter((p): p is PoolSummary => p !== null);
   }
 
   async detail(poolId: string, userId: string): Promise<PoolDetail> {
@@ -102,7 +121,7 @@ export class PoolsService {
     const pool = await this.prisma.pool.findUnique({
       where: { id: poolId },
       include: {
-        season: { select: TOURNAMENT_SELECT },
+        runs: { include: { season: { select: TOURNAMENT_SELECT } } },
         members: {
           include: {
             user: { select: { id: true, name: true, avatarUrl: true } },
@@ -116,6 +135,13 @@ export class PoolsService {
       throw new NotFoundException({
         code: 'NOT_FOUND',
         message: 'Bolão não encontrado.',
+      });
+    }
+    const run = this.pickCurrentRun(pool.runs);
+    if (!run) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Bolão sem temporada.',
       });
     }
 
@@ -133,7 +159,8 @@ export class PoolsService {
       description: pool.description,
       inviteDescription: pool.inviteDescription,
       visibility: pool.visibility,
-      tournament: pool.season,
+      tournament: run.season,
+      currentRun: this.runView(run),
       myRole: membership.role,
       memberCount: pool._count.members,
       createdAt: pool.createdAt,
@@ -302,13 +329,20 @@ export class PoolsService {
       include: {
         pool: {
           include: {
-            season: { select: TOURNAMENT_SELECT },
+            runs: { include: { season: { select: TOURNAMENT_SELECT } } },
             _count: { select: { members: true } },
           },
         },
       },
     });
     if (!invite || !invite.isActive) {
+      throw new NotFoundException({
+        code: 'INVITE_INVALID',
+        message: 'Link de convite inválido ou expirado.',
+      });
+    }
+    const run = this.pickCurrentRun(invite.pool.runs);
+    if (!run) {
       throw new NotFoundException({
         code: 'INVITE_INVALID',
         message: 'Link de convite inválido ou expirado.',
@@ -324,7 +358,7 @@ export class PoolsService {
       // The invite page shows the invite-facing text, not the internal one.
       description: invite.pool.inviteDescription,
       visibility: invite.pool.visibility,
-      tournament: invite.pool.season,
+      tournament: run.season,
       memberCount: invite.pool._count.members,
       alreadyMember: !!already,
     };
@@ -438,20 +472,149 @@ export class PoolsService {
   async tournamentRanking(
     poolId: string,
     userId: string,
+    // Defaults to the current temporada; pass a runId to view a past one.
+    runId?: string,
   ): Promise<RankingResponse> {
     await this.requireMembership(poolId, userId);
-    const pool = await this.prisma.pool.findUnique({
-      where: { id: poolId },
-      select: { seasonId: true },
-    });
-    if (!pool) {
+    const run = runId
+      ? await this.findRun(poolId, runId)
+      : await this.currentRun(poolId);
+    if (!run) {
       throw new NotFoundException({
         code: 'NOT_FOUND',
-        message: 'Bolão não encontrado.',
+        message: 'Bolão sem temporada.',
       });
     }
     const memberIds = await this.memberUserIds(poolId);
-    return this.rankings.tournamentRanking(pool.seasonId, userId, memberIds);
+    // Not started yet → everyone at zero.
+    if (run.status === 'DRAFT' || !run.startAt) {
+      return this.rankings.zeroRanking(memberIds, userId);
+    }
+    return this.rankings.tournamentRanking(run.seasonId, userId, memberIds, {
+      startAt: run.startAt,
+      endAt: run.endAt,
+    });
+  }
+
+  // ─────────────────────────────────────────────── Temporadas (runs)
+
+  /** Open a new temporada (must close the current one first). Owner/admin. */
+  async createRun(
+    poolId: string,
+    userId: string,
+    dto: CreateRunDto,
+  ): Promise<PoolDetail> {
+    await this.requireManage(poolId, userId);
+    const open = await this.prisma.poolRun.findFirst({
+      where: { poolId, endAt: null },
+      select: { id: true },
+    });
+    if (open) {
+      throw new BadRequestException({
+        code: 'RUN_OPEN',
+        message: 'Encerre a temporada atual antes de abrir uma nova.',
+      });
+    }
+    const season = await this.prisma.season.findUnique({
+      where: { id: dto.seasonId },
+      select: { id: true },
+    });
+    if (!season) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Torneio não encontrado.',
+      });
+    }
+    const count = await this.prisma.poolRun.count({ where: { poolId } });
+    await this.prisma.poolRun.create({
+      data: {
+        poolId,
+        seasonId: dto.seasonId,
+        label: dto.label ?? `Temporada ${count + 1}`,
+        order: count + 1,
+        ...(dto.start && { status: 'ACTIVE', startAt: new Date() }),
+      },
+    });
+    return this.detail(poolId, userId);
+  }
+
+  /** Start a DRAFT temporada — stamps startAt; points count from here. */
+  async startRun(
+    poolId: string,
+    userId: string,
+    runId: string,
+  ): Promise<PoolDetail> {
+    await this.requireManage(poolId, userId);
+    const run = await this.findRun(poolId, runId);
+    if (run.status !== 'DRAFT') {
+      throw new BadRequestException({
+        code: 'RUN_NOT_DRAFT',
+        message: 'Esta temporada já foi iniciada.',
+      });
+    }
+    await this.prisma.poolRun.update({
+      where: { id: runId },
+      data: { status: 'ACTIVE', startAt: new Date() },
+    });
+    return this.detail(poolId, userId);
+  }
+
+  /** Close an ACTIVE temporada — freezes the window; champion is final. */
+  async endRun(
+    poolId: string,
+    userId: string,
+    runId: string,
+  ): Promise<PoolDetail> {
+    await this.requireManage(poolId, userId);
+    const run = await this.findRun(poolId, runId);
+    if (run.status !== 'ACTIVE') {
+      throw new BadRequestException({
+        code: 'RUN_NOT_ACTIVE',
+        message: 'Só dá para encerrar uma temporada em andamento.',
+      });
+    }
+    await this.prisma.poolRun.update({
+      where: { id: runId },
+      data: { status: 'ENDED', endAt: new Date() },
+    });
+    return this.detail(poolId, userId);
+  }
+
+  /** Every temporada of the pool with its winner — newest first. Members only. */
+  async listRuns(
+    poolId: string,
+    userId: string,
+  ): Promise<PoolRunWithChampion[]> {
+    await this.requireMembership(poolId, userId);
+    const memberIds = await this.memberUserIds(poolId);
+    const runs = await this.prisma.poolRun.findMany({
+      where: { poolId },
+      include: { season: { select: TOURNAMENT_SELECT } },
+      orderBy: { order: 'desc' },
+    });
+    return Promise.all(
+      runs.map(async (r) => {
+        let champion: PoolRunWithChampion['champion'] = null;
+        let totalParticipants = 0;
+        if (r.status !== 'DRAFT' && r.startAt) {
+          const ranking = await this.rankings.tournamentRanking(
+            r.seasonId,
+            userId,
+            memberIds,
+            { startAt: r.startAt, endAt: r.endAt },
+          );
+          totalParticipants = ranking.totalParticipants;
+          const top = ranking.entries[0];
+          if (top) champion = { user: top.user, points: top.points };
+        }
+        return {
+          ...this.runView(r),
+          tournament: r.season,
+          champion,
+          totalParticipants,
+        };
+      }),
+    );
   }
 
   async matchRanking(
@@ -610,6 +773,51 @@ export class PoolsService {
       select: { userId: true },
     });
     return members.map((m) => m.userId);
+  }
+
+  /** The open temporada (endAt null) if any, otherwise the most recent one. */
+  private async currentRun(poolId: string): Promise<PoolRun | null> {
+    const open = await this.prisma.poolRun.findFirst({
+      where: { poolId, endAt: null },
+      orderBy: { order: 'desc' },
+    });
+    if (open) return open;
+    return this.prisma.poolRun.findFirst({
+      where: { poolId },
+      orderBy: { order: 'desc' },
+    });
+  }
+
+  private async findRun(poolId: string, runId: string): Promise<PoolRun> {
+    const run = await this.prisma.poolRun.findUnique({ where: { id: runId } });
+    if (!run || run.poolId !== poolId) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Temporada não encontrada.',
+      });
+    }
+    return run;
+  }
+
+  /** Pick the open run (or latest by order) from an already-loaded list. */
+  private pickCurrentRun<T extends { endAt: Date | null; order: number }>(
+    runs: T[],
+  ): T | null {
+    if (!runs.length) return null;
+    const open = runs.filter((r) => r.endAt === null);
+    const pool = open.length ? open : runs;
+    return pool.reduce((a, b) => (b.order > a.order ? b : a));
+  }
+
+  private runView(run: PoolRun): PoolRunView {
+    return {
+      id: run.id,
+      label: run.label,
+      status: run.status,
+      startAt: run.startAt,
+      endAt: run.endAt,
+      order: run.order,
+    };
   }
 
   private canManage(role: PoolMemberRole): boolean {

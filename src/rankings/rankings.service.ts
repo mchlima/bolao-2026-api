@@ -65,6 +65,10 @@ export class RankingsService {
     // When given, the ranking is scoped to these members (a pool/"bolão");
     // omit for the global ranking on the tournament page.
     memberUserIds?: string[],
+    // When given (a pool "temporada"/run), only matches whose kickoff is after
+    // startAt — and up to endAt when the run is closed — count. Omit for the
+    // global ranking, which always sums the whole tournament history.
+    window?: { startAt: Date; endAt?: Date | null },
   ): Promise<RankingResponse> {
     const tournament = await this.prisma.season.findUnique({
       where: { id: seasonId },
@@ -79,10 +83,18 @@ export class RankingsService {
 
     // LIVE or FINISHED matches contribute a scoreline (CANCELLED excluded); a
     // null side counts as 0, so provisional live points reflect e.g. 1-0.
+    // A run window restricts to matches that kicked off strictly after the start
+    // (a match already underway at start time doesn't count — the next one does).
     const matches = await this.prisma.match.findMany({
       where: {
         seasonId,
         status: { in: ['LIVE', 'FINISHED'] },
+        ...(window && {
+          kickoffAt: {
+            gt: window.startAt,
+            ...(window.endAt ? { lte: window.endAt } : {}),
+          },
+        }),
       },
       select: { id: true, roundId: true, homeScore: true, awayScore: true },
     });
@@ -145,6 +157,24 @@ export class RankingsService {
     }
 
     return this.buildResponse([...acc.values()], currentUserId);
+  }
+
+  /**
+   * Everyone at zero — used by a pool run that hasn't started yet (DRAFT). Lists
+   * the members so the table shows the lineup before the first match counts.
+   */
+  async zeroRanking(
+    memberUserIds: string[],
+    currentUserId?: string,
+  ): Promise<RankingResponse> {
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: memberUserIds }, isActive: true },
+      select: { id: true, name: true, avatarUrl: true },
+    });
+    return this.buildResponse(
+      users.map((user) => ({ user, points: 0, exact: 0, scored: 0 })),
+      currentUserId,
+    );
   }
 
   async matchRanking(

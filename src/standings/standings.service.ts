@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { Prisma, SeasonStatus } from '@prisma/client';
+import type { PoolRun, Prisma, SeasonStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RankingsService } from '../rankings/rankings.service';
 import type {
@@ -43,7 +43,11 @@ export class StandingsService {
         where: { userId },
         select: {
           pool: {
-            select: { id: true, name: true, season: { select: TOURNAMENT_SELECT } },
+            select: {
+              id: true,
+              name: true,
+              runs: { include: { season: { select: TOURNAMENT_SELECT } } },
+            },
           },
         },
         orderBy: { joinedAt: 'asc' },
@@ -54,17 +58,26 @@ export class StandingsService {
       }),
     ]);
 
+    // Each pool is placed under its CURRENT temporada's season, scored within
+    // that run's window. Pools without a run are skipped (shouldn't happen).
+    const poolEntries = memberships
+      .map((m) => {
+        const run = pickCurrentRun(m.pool.runs);
+        return run ? { poolId: m.pool.id, name: m.pool.name, run } : null;
+      })
+      .filter((p): p is PoolEntry => p !== null);
+
     // Distinct seasons across both sources, keeping the season metadata.
     const seasons = new Map<string, (typeof predictedSeasons)[number]>();
     for (const s of predictedSeasons) seasons.set(s.id, s);
-    for (const m of memberships) seasons.set(m.pool.season.id, m.pool.season);
+    for (const p of poolEntries) seasons.set(p.run.season.id, p.run.season);
 
-    // Pools grouped by their season, preserving membership order.
-    const poolsBySeason = new Map<string, { id: string; name: string }[]>();
-    for (const m of memberships) {
-      const list = poolsBySeason.get(m.pool.season.id) ?? [];
-      list.push({ id: m.pool.id, name: m.pool.name });
-      poolsBySeason.set(m.pool.season.id, list);
+    // Pools grouped by their current run's season, preserving membership order.
+    const poolsBySeason = new Map<string, PoolEntry[]>();
+    for (const p of poolEntries) {
+      const list = poolsBySeason.get(p.run.season.id) ?? [];
+      list.push(p);
+      poolsBySeason.set(p.run.season.id, list);
     }
 
     const ordered = [...seasons.values()].sort(
@@ -80,7 +93,7 @@ export class StandingsService {
 
   private async buildTournament(
     season: { id: string; name: string; status: SeasonStatus },
-    pools: { id: string; name: string }[],
+    pools: PoolEntry[],
     userId: string,
   ): Promise<MyStandingsTournament> {
     const [general, poolStandings] = await Promise.all([
@@ -88,7 +101,7 @@ export class StandingsService {
         me: r.currentUser,
         total: r.totalParticipants,
       })),
-      Promise.all(pools.map((p) => this.poolStanding(season.id, p, userId))),
+      Promise.all(pools.map((p) => this.poolStanding(p, userId))),
     ]);
 
     return {
@@ -101,24 +114,45 @@ export class StandingsService {
   }
 
   private async poolStanding(
-    seasonId: string,
-    pool: { id: string; name: string },
+    pool: PoolEntry,
     userId: string,
   ): Promise<MyPoolStanding> {
     const members = await this.prisma.poolMember.findMany({
-      where: { poolId: pool.id },
+      where: { poolId: pool.poolId },
       select: { userId: true },
     });
-    const ranking = await this.rankings.tournamentRanking(
-      seasonId,
-      userId,
-      members.map((m) => m.userId),
-    );
+    const ids = members.map((m) => m.userId);
+    const { run } = pool;
+    // A run that hasn't started yet shows everyone at zero.
+    const ranking =
+      run.status === 'DRAFT' || !run.startAt
+        ? await this.rankings.zeroRanking(ids, userId)
+        : await this.rankings.tournamentRanking(run.seasonId, userId, ids, {
+            startAt: run.startAt,
+            endAt: run.endAt,
+          });
     return {
-      poolId: pool.id,
+      poolId: pool.poolId,
       name: pool.name,
       me: ranking.currentUser,
       total: ranking.totalParticipants,
     };
   }
+}
+
+type PoolRunWithSeason = PoolRun & {
+  season: { id: string; name: string; logoUrl: string | null; status: SeasonStatus };
+};
+interface PoolEntry {
+  poolId: string;
+  name: string;
+  run: PoolRunWithSeason;
+}
+
+/** The open temporada (endAt null) if any, otherwise the latest by order. */
+function pickCurrentRun(runs: PoolRunWithSeason[]): PoolRunWithSeason | null {
+  if (!runs.length) return null;
+  const open = runs.filter((r) => r.endAt === null);
+  const pool = open.length ? open : runs;
+  return pool.reduce((a, b) => (b.order > a.order ? b : a));
 }

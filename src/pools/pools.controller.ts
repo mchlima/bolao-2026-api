@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -18,6 +19,7 @@ import type {
 import type { SafeUser } from '../users/user.types';
 import { CreateInviteDto } from './dto/create-invite.dto';
 import { CreatePoolDto } from './dto/create-pool.dto';
+import { CreateRunDto } from './dto/create-run.dto';
 import { TransferOwnershipDto } from './dto/transfer-ownership.dto';
 import { UpdateInviteDto } from './dto/update-invite.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
@@ -27,6 +29,7 @@ import type {
   PoolDetail,
   PoolInviteView,
   PoolMatchPredictionsView,
+  PoolRunWithChampion,
   PoolSummary,
 } from './pool.types';
 import { PoolsService } from './pools.service';
@@ -175,14 +178,55 @@ export class PoolsController {
     return this.pools.removeMember(id, user.id, targetUserId);
   }
 
+  // ── Temporadas (runs) ──
+
+  @Get(':id/runs')
+  runs(
+    @CurrentUser() user: SafeUser,
+    @Param('id') id: string,
+  ): Promise<PoolRunWithChampion[]> {
+    return this.pools.listRuns(id, user.id);
+  }
+
+  @Post(':id/runs')
+  createRun(
+    @CurrentUser() user: SafeUser,
+    @Param('id') id: string,
+    @Body() dto: CreateRunDto,
+  ): Promise<PoolDetail> {
+    return this.pools.createRun(id, user.id, dto);
+  }
+
+  @Post(':id/runs/:runId/start')
+  @HttpCode(200)
+  startRun(
+    @CurrentUser() user: SafeUser,
+    @Param('id') id: string,
+    @Param('runId') runId: string,
+  ): Promise<PoolDetail> {
+    return this.pools.startRun(id, user.id, runId);
+  }
+
+  @Post(':id/runs/:runId/end')
+  @HttpCode(200)
+  endRun(
+    @CurrentUser() user: SafeUser,
+    @Param('id') id: string,
+    @Param('runId') runId: string,
+  ): Promise<PoolDetail> {
+    return this.pools.endRun(id, user.id, runId);
+  }
+
   // ── Scoped rankings (members only) ──
 
   @Get(':id/ranking')
   ranking(
     @CurrentUser() user: SafeUser,
     @Param('id') id: string,
+    // Defaults to the current temporada; pass ?runId to view a past one.
+    @Query('runId') runId?: string,
   ): Promise<RankingResponse> {
-    return this.pools.tournamentRanking(id, user.id);
+    return this.pools.tournamentRanking(id, user.id, runId);
   }
 
   @Get(':id/matches/:matchId/ranking')

@@ -1,4 +1,4 @@
-import { PoolMemberRole, PoolVisibility } from '@prisma/client';
+import { PoolMemberRole, PoolRunStatus, PoolVisibility } from '@prisma/client';
 import { ScoreTier } from '../scoring/scoring.service';
 
 export interface TournamentSummary {
@@ -6,6 +6,23 @@ export interface TournamentSummary {
   name: string;
   logoUrl: string | null;
   status: string;
+}
+
+/** A pool's "temporada" — the season it disputes within a time window. */
+export interface PoolRunView {
+  id: string;
+  label: string | null;
+  status: PoolRunStatus; // DRAFT | ACTIVE | ENDED
+  startAt: Date | null;
+  endAt: Date | null;
+  order: number;
+}
+
+/** A past/current temporada with its winner (for the "temporadas" history). */
+export interface PoolRunWithChampion extends PoolRunView {
+  tournament: TournamentSummary;
+  champion: { user: { id: string; name: string; avatarUrl: string | null }; points: number } | null;
+  totalParticipants: number;
 }
 
 export interface PoolMemberView {
@@ -29,7 +46,8 @@ export interface PoolSummary {
   description: string | null; // internal (members)
   inviteDescription: string | null; // shown on the invite page
   visibility: PoolVisibility;
-  tournament: TournamentSummary;
+  tournament: TournamentSummary; // the current temporada's season
+  currentRun: PoolRunView | null; // the open (or latest) temporada
   myRole: PoolMemberRole;
   memberCount: number;
   createdAt: Date;

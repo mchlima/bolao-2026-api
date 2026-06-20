@@ -1,5 +1,12 @@
 import { PoolVisibility } from '@prisma/client';
-import { IsEnum, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 export class CreatePoolDto {
   @IsString()
@@ -19,6 +26,7 @@ export class CreatePoolDto {
   @MaxLength(500)
   inviteDescription?: string;
 
+  // The season the first temporada (run) disputes.
   @IsString()
   seasonId!: string;
 
@@ -26,4 +34,10 @@ export class CreatePoolDto {
   @IsOptional()
   @IsEnum(PoolVisibility)
   visibility?: PoolVisibility;
+
+  // Start the first temporada right away instead of leaving it as DRAFT (the
+  // owner can otherwise gather members first, then press "Iniciar").
+  @IsOptional()
+  @IsBoolean()
+  start?: boolean;
 }
