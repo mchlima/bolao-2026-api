@@ -22,7 +22,8 @@ const MATCH_INCLUDE = {
       startDate: true,
       endDate: true,
       location: true,
-      competition: { select: { country: true } },
+      logoUrl: true,
+      competition: { select: { country: true, confederation: true } },
     },
   },
   round: { select: { number: true, name: true } },
@@ -43,6 +44,11 @@ const MATCH_DETAIL_INCLUDE = {
 export type MatchDetail = Prisma.MatchGetPayload<{
   include: typeof MATCH_DETAIL_INCLUDE;
 }>;
+
+// findOne enriches the season with its participating teams (for SEO structured data).
+export type MatchDetailWithTeams = MatchDetail & {
+  season: MatchDetail['season'] & { teams: { name: string; logoUrl: string | null }[] };
+};
 
 @Injectable()
 export class MatchesService {
@@ -80,7 +86,7 @@ export class MatchesService {
     return paginated(data, total, page, pageSize);
   }
 
-  async findOne(id: string): Promise<MatchDetail> {
+  async findOne(id: string): Promise<MatchDetailWithTeams> {
     const match = await this.prisma.match.findUnique({
       where: { id },
       include: MATCH_DETAIL_INCLUDE,
@@ -92,7 +98,15 @@ export class MatchesService {
         message: 'Partida não encontrada.',
       });
     }
-    return match;
+    // Participating teams of the season (distinct across all groups) — feeds the
+    // SportsEvent.superEvent `performer` in the page's structured data. Indexed,
+    // name+crest only; one extra query on the detail load (shared by every match).
+    const teams = await this.prisma.team.findMany({
+      where: { groupTeams: { some: { group: { stage: { seasonId: match.seasonId } } } } },
+      select: { name: true, logoUrl: true },
+      orderBy: { name: 'asc' },
+    });
+    return { ...match, season: { ...match.season, teams } };
   }
 
   async create(dto: CreateMatchDto): Promise<MatchWithRelations> {
