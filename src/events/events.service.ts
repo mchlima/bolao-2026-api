@@ -8,12 +8,15 @@ export interface RealtimeEvent {
 
 interface Connection {
   userId: string | null; // from the front's `user:<id>` room; trusted best-effort
+  deviceId: string | null; // stable per-browser id; null for old/unidentified clients
   since: Date;
 }
 
 export interface Presence {
-  total: number; // every open stream, logged-in or anonymous
-  users: { userId: string; connections: number; since: Date }[];
+  total: number; // distinct people online (a logged-in user counts once across
+  // tabs/devices; an anonymous browser counts once per device)
+  anon: number; // anonymous devices — the slice of `total` with no `userId`
+  users: { userId: string; devices: number; since: Date }[];
 }
 
 /**
@@ -34,9 +37,9 @@ export class EventsService {
   private nextConnId = 1;
 
   /** Register an open SSE stream; returns an id to release it on disconnect. */
-  addConnection(userId: string | null): number {
+  addConnection(userId: string | null, deviceId: string | null): number {
     const id = this.nextConnId++;
-    this.connections.set(id, { userId, since: new Date() });
+    this.connections.set(id, { userId, deviceId, since: new Date() });
     return id;
   }
 
@@ -44,22 +47,37 @@ export class EventsService {
     this.connections.delete(id);
   }
 
-  /** Snapshot of who's connected: total count + per-identified-user breakdown. */
+  /** Snapshot of who's connected, counted by person/device rather than by raw
+   * stream: multiple tabs of one browser share a deviceId and collapse to one
+   * device, and a logged-in user counts once no matter how many devices/tabs.
+   * `total` is distinct people; each identified user reports its device count.
+   * A null deviceId (old client) can't be deduped, so it falls back to the
+   * connection id — i.e. it counts as its own device, the pre-deviceId behavior. */
   presence(): Presence {
-    const byUser = new Map<string, { connections: number; since: Date }>();
-    for (const c of this.connections.values()) {
-      if (!c.userId) continue;
+    const byUser = new Map<string, { devices: Set<string>; since: Date }>();
+    const anonDevices = new Set<string>();
+    for (const [id, c] of this.connections) {
+      const deviceKey = c.deviceId ?? `conn:${id}`;
+      if (!c.userId) {
+        anonDevices.add(deviceKey);
+        continue;
+      }
       const e = byUser.get(c.userId);
       if (e) {
-        e.connections += 1;
+        e.devices.add(deviceKey);
         if (c.since < e.since) e.since = c.since;
       } else {
-        byUser.set(c.userId, { connections: 1, since: c.since });
+        byUser.set(c.userId, { devices: new Set([deviceKey]), since: c.since });
       }
     }
     return {
-      total: this.connections.size,
-      users: [...byUser].map(([userId, v]) => ({ userId, ...v })),
+      total: byUser.size + anonDevices.size,
+      anon: anonDevices.size,
+      users: [...byUser].map(([userId, v]) => ({
+        userId,
+        devices: v.devices.size,
+        since: v.since,
+      })),
     };
   }
 

@@ -31,6 +31,7 @@ export class EventsController {
   stream(
     @Req() req: Request,
     @Query('rooms') rooms?: string,
+    @Query('did') did?: string,
   ): Observable<{ data: unknown }> {
     const list = (rooms ?? '')
       .split(',')
@@ -52,7 +53,7 @@ export class EventsController {
     }
     if (!userId)
       userId = list.find((r) => r.startsWith('user:'))?.slice(5) || null;
-    const connId = this.events.addConnection(userId);
+    const connId = this.events.addConnection(userId, did?.trim() || null);
     const data$ = this.events.stream(list).pipe(map((e) => ({ data: e })));
     const ping$ = interval(30000).pipe(map(() => ({ data: { ping: true } })));
     return merge(data$, ping$).pipe(

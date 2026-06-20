@@ -12,12 +12,13 @@ export interface DashboardOverview {
 }
 
 export interface OnlinePresence {
-  total: number; // todas as conexões SSE abertas (logadas ou não)
+  total: number; // pessoas distintas online (logado conta 1 entre abas/dispositivos)
+  others: number; // não identificados: dispositivos anônimos + ids sem usuário real
   users: {
     id: string;
     name: string;
     avatarUrl: string | null;
-    connections: number;
+    devices: number;
     since: string;
   }[];
 }
@@ -29,8 +30,9 @@ export class DashboardService {
     private readonly events: EventsService,
   ) {}
 
-  /** Live presence from the SSE bus: total open streams + the users we could
-   * identify (by name). Anonymous/unresolved streams only add to `total`. */
+  /** Live presence from the SSE bus: distinct people online + the ones we could
+   * identify (by name). Anonymous devices and ids without a real user fold into
+   * `others` so the front doesn't have to derive it by subtraction. */
   async online(): Promise<OnlinePresence> {
     const presence = this.events.presence();
     const ids = presence.users.map((u) => u.userId);
@@ -41,21 +43,25 @@ export class DashboardService {
         })
       : [];
     const byId = new Map(rows.map((r) => [r.id, r]));
+    let unresolved = 0;
     const users = presence.users
       .map((u) => {
         const row = byId.get(u.userId);
-        if (!row) return null; // id sem usuário real → fica só no total
+        if (!row) {
+          unresolved += 1; // id sem usuário real → conta como 1 "não identificado"
+          return null;
+        }
         return {
           id: row.id,
           name: row.name,
           avatarUrl: row.avatarUrl,
-          connections: u.connections,
+          devices: u.devices,
           since: u.since.toISOString(),
         };
       })
       .filter((u): u is NonNullable<typeof u> => u !== null)
       .sort((a, b) => a.since.localeCompare(b.since));
-    return { total: presence.total, users };
+    return { total: presence.total, others: presence.anon + unresolved, users };
   }
 
   async overview(): Promise<DashboardOverview> {
