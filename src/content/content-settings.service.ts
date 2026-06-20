@@ -17,7 +17,7 @@ export interface DayUsage {
 }
 
 const DEFAULTS: ContentConfig = {
-  paused: false,
+  paused: true, // robô começa DESLIGADO — liga de propósito no painel
   dailyBudgetUsd: 1,
   maxPerDay: 50,
   generateModel: 'claude-sonnet-4-6',
