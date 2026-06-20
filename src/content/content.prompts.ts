@@ -19,6 +19,9 @@ export const EXTRACT_SYSTEM = [
   '  (resultado, contratação, lesão, declaração, escalação, tabela...). Listas,',
   '  publicidade, horóscopo, conteúdo institucional ou vazio → false.',
   '- relevanceScore: 0..1, o quão relevante/noticiável é para um público de futebol.',
+  '  SE houver um "FOCO DO EDITOR" no fim da mensagem, pontue a relevância EM RELAÇÃO',
+  '  a esse foco: notícia que bate com o foco → nota alta; fora do foco → nota baixa',
+  '  (mesmo sendo futebol legítimo). Sem foco, pontue pela relevância geral.',
   '- Extraia SÓ o que está no texto. NÃO invente, não complete, não deduza placar.',
   '- SEJA EXAUSTIVO: capture TODOS os fatos concretos do corpo — números, nomes,',
   '  datas, estatísticas, sequências, lesões, contexto (próximo jogo, situação na',
@@ -29,14 +32,26 @@ export const EXTRACT_SYSTEM = [
   '- Se algum campo não existir no texto, devolva string vazia ou lista vazia.',
 ].join('\n');
 
-export function buildExtractContents(title: string, body: string | null): string {
-  return [
+export function buildExtractContents(
+  title: string,
+  body: string | null,
+  focus?: string | null,
+): string {
+  const parts = [
     'TÍTULO DA NOTÍCIA:',
     title,
     '',
     'CORPO DA NOTÍCIA:',
     body?.trim() || '(sem corpo)',
-  ].join('\n');
+  ];
+  if (focus?.trim()) {
+    parts.push(
+      '',
+      'FOCO DO EDITOR (pontue a relevância em relação a isto):',
+      focus.trim(),
+    );
+  }
+  return parts.join('\n');
 }
 
 // JSON Schema for the extraction tool's input — Claude fills it via forced tool use.

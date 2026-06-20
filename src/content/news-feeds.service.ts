@@ -48,6 +48,7 @@ export class NewsFeedsService {
           ...(dto.type && { type: dto.type }),
           ...(dto.config !== undefined && { config: dto.config as Prisma.InputJsonValue }),
           ...(dto.sport?.trim() && { sport: dto.sport.trim() }),
+          ...(dto.focus !== undefined && { focus: dto.focus?.trim() || null }),
           ...(dto.defaultToneId && { defaultToneId: dto.defaultToneId }),
           ...(dto.fetchIntervalMin !== undefined && { fetchIntervalMin: dto.fetchIntervalMin }),
           ...(dto.isActive !== undefined && { isActive: dto.isActive }),
@@ -69,6 +70,7 @@ export class NewsFeedsService {
         config: (dto.config ?? Prisma.DbNull) as Prisma.InputJsonValue,
       }),
       ...(dto.sport !== undefined && { sport: dto.sport.trim() }),
+      ...(dto.focus !== undefined && { focus: dto.focus?.trim() || null }),
       ...(dto.fetchIntervalMin !== undefined && { fetchIntervalMin: dto.fetchIntervalMin }),
       ...(dto.isActive !== undefined && { isActive: dto.isActive }),
     };

@@ -70,13 +70,17 @@ export class LlmService {
   }
 
   /** One cheap call: is this relevant sports news, and what are the facts. */
-  async extractAndClassify(title: string, body: string | null): Promise<ExtractResult> {
+  async extractAndClassify(
+    title: string,
+    body: string | null,
+    focus?: string | null,
+  ): Promise<ExtractResult> {
     const client = this.assertClient();
     const res = await client.messages.create({
       model: MODEL_EXTRACT,
       max_tokens: 2048,
       system: EXTRACT_SYSTEM,
-      messages: [{ role: 'user', content: buildExtractContents(title, body) }],
+      messages: [{ role: 'user', content: buildExtractContents(title, body, focus) }],
       tools: [
         {
           name: 'record_facts',

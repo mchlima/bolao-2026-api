@@ -95,6 +95,7 @@ export class ContentProcessService {
       const extracted = await this.llm.extractAndClassify(
         item.sourceTitle,
         body ?? item.sourceSummary,
+        item.feed?.focus ?? null,
       );
 
       // Gate 1: auto-filter. Irrelevant items park as FILTERED (rescuable).

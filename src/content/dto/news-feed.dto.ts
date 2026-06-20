@@ -39,6 +39,11 @@ export class CreateNewsFeedDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(600)
+  focus?: string;
+
+  @IsOptional()
+  @IsString()
   defaultToneId?: string;
 
   @IsOptional()
@@ -76,6 +81,11 @@ export class UpdateNewsFeedDto {
   @IsString()
   @MaxLength(40)
   sport?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(600)
+  focus?: string | null;
 
   @IsOptional()
   @IsString()

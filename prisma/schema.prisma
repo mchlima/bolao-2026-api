@@ -905,6 +905,7 @@ model NewsFeed {
   type             String    @default("RSS") // RSS | NEWS_API | PAGE — the connector to use
   config           Json? // type-specific settings (API mapping, page selectors, ...)
   sport            String    @default("football")
+  focus            String? // o que o editor quer desta fonte; entra na nota de relevância (vazio = relevância geral)
   isActive         Boolean   @default(true)
   defaultToneId    String? // tom applied to this feed's items (overridable per item)
   fetchIntervalMin Int       @default(15)
