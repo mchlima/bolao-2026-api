@@ -13,6 +13,7 @@ export interface DashboardOverview {
 
 export interface OnlinePresence {
   total: number; // pessoas distintas online (logado conta 1 entre abas/dispositivos)
+  devices: number; // dispositivos distintos online (uma pessoa pode ter vários)
   others: number; // não identificados: dispositivos anônimos + ids sem usuário real
   users: {
     id: string;
@@ -61,7 +62,12 @@ export class DashboardService {
       })
       .filter((u): u is NonNullable<typeof u> => u !== null)
       .sort((a, b) => a.since.localeCompare(b.since));
-    return { total: presence.total, others: presence.anon + unresolved, users };
+    return {
+      total: presence.total,
+      devices: presence.devices,
+      others: presence.anon + unresolved,
+      users,
+    };
   }
 
   async overview(): Promise<DashboardOverview> {

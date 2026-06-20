@@ -15,7 +15,8 @@ interface Connection {
 export interface Presence {
   total: number; // distinct people online (a logged-in user counts once across
   // tabs/devices; an anonymous browser counts once per device)
-  anon: number; // anonymous devices — the slice of `total` with no `userId`
+  devices: number; // distinct devices online (a person can have several)
+  anon: number; // anonymous devices — the slice of `devices` with no `userId`
   users: { userId: string; devices: number; since: Date }[];
 }
 
@@ -70,14 +71,17 @@ export class EventsService {
         byUser.set(c.userId, { devices: new Set([deviceKey]), since: c.since });
       }
     }
+    const users = [...byUser].map(([userId, v]) => ({
+      userId,
+      devices: v.devices.size,
+      since: v.since,
+    }));
+    const userDevices = users.reduce((sum, u) => sum + u.devices, 0);
     return {
       total: byUser.size + anonDevices.size,
+      devices: userDevices + anonDevices.size,
       anon: anonDevices.size,
-      users: [...byUser].map(([userId, v]) => ({
-        userId,
-        devices: v.devices.size,
-        since: v.since,
-      })),
+      users,
     };
   }
 
