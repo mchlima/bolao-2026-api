@@ -30,6 +30,11 @@ export class CreateSeasonDto {
   logoUrl?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  location?: string;
+
+  @IsOptional()
   @Type(() => Date)
   @IsDate()
   startDate?: Date;

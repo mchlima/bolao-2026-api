@@ -363,6 +363,7 @@ model Season {
   name          String // full display name, e.g. "Copa do Mundo FIFA 2026"
   seasonLabel   String? // edition label, e.g. "2026", "2025/26"
   logoUrl       String?
+  location      String? // host city/country of the edition, e.g. "Estados Unidos, Canadá e México" (feeds SportsEvent JSON-LD)
   startDate     DateTime?
   endDate       DateTime?
   status        SeasonStatus @default(DRAFT)

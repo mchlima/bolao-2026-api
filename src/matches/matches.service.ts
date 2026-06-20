@@ -14,7 +14,17 @@ const MATCH_INCLUDE = {
   homeTeam: true,
   awayTeam: true,
   stadium: true,
-  season: { select: { id: true, name: true, status: true } },
+  season: {
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      startDate: true,
+      endDate: true,
+      location: true,
+      competition: { select: { country: true } },
+    },
+  },
   round: { select: { number: true, name: true } },
 } satisfies Prisma.MatchInclude;
 
