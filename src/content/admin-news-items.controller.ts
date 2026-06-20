@@ -1,0 +1,70 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import { NewsItem, UserRole } from '@prisma/client';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Paginated } from '../common/pagination';
+import type { SafeUser } from '../users/user.types';
+import { NewsItemsService } from './news-items.service';
+import { ListItemsQueryDto, ReprocessItemDto } from './dto/news-item.dto';
+
+@Controller('admin/content/items')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.ADMIN)
+export class AdminNewsItemsController {
+  constructor(private readonly items: NewsItemsService) {}
+
+  @Get()
+  list(@Query() q: ListItemsQueryDto): Promise<Paginated<NewsItem>> {
+    return this.items.list(q);
+  }
+
+  @Get(':id')
+  getOne(@Param('id') id: string): Promise<NewsItem> {
+    return this.items.getOne(id);
+  }
+
+  @Get(':id/export')
+  export(@Param('id') id: string): Promise<{ filename: string; content: string }> {
+    return this.items.export(id);
+  }
+
+  @Post(':id/approve')
+  approve(@Param('id') id: string, @CurrentUser() admin: SafeUser): Promise<NewsItem> {
+    return this.items.approve(id, admin.id);
+  }
+
+  @Post(':id/reject')
+  reject(@Param('id') id: string, @CurrentUser() admin: SafeUser): Promise<NewsItem> {
+    return this.items.reject(id, admin.id);
+  }
+
+  /** Re-generate with an editor steer (appends a revision). */
+  @Post(':id/reprocess')
+  reprocess(@Param('id') id: string, @Body() dto: ReprocessItemDto): Promise<NewsItem> {
+    return this.items.reprocess(id, dto);
+  }
+
+  /** Override the auto-filter / a rejection: generate from existing facts. */
+  @Post(':id/rescue')
+  rescue(@Param('id') id: string, @Query('force') force?: string): Promise<NewsItem> {
+    return this.items.rescue(id, force === 'true');
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  remove(@Param('id') id: string): Promise<void> {
+    return this.items.remove(id);
+  }
+}

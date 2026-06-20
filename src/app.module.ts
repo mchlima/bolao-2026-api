@@ -33,6 +33,7 @@ import { FollowsModule } from './follows/follows.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
 import { StandingsModule } from './standings/standings.module';
+import { ContentModule } from './content/content.module';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { StandingsModule } from './standings/standings.module';
     MatchSummaryModule,
     BackupModule,
     AgendaModule,
+    ContentModule,
   ],
   controllers: [AppController],
   providers: [AppService],

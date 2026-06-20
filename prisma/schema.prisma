@@ -882,3 +882,124 @@ model PoolInvite {
   @@index([poolId])
   @@map("pool_invites")
 }
+
+// Generic key/value for global app flags (e.g. content.paused). One row per key.
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("app_settings")
+}
+
+// ─────────────────────────────────── Content pipeline (RSS → rewrite in a tom)
+
+// A managed RSS source. The ingest cron polls active feeds, dedups by guid, and
+// drops new DISCOVERED items onto the pipeline. lastStatus/lastError surface feed
+// health in the admin so a broken source is obvious at a glance. Removing a feed
+// keeps its already-produced items (NewsItem.feedId → SetNull).
+model NewsFeed {
+  id               String    @id @default(cuid())
+  name             String
+  url              String    @unique
+  type             String    @default("RSS") // RSS | NEWS_API | PAGE — the connector to use
+  config           Json? // type-specific settings (API mapping, page selectors, ...)
+  sport            String    @default("football")
+  isActive         Boolean   @default(true)
+  defaultToneId    String? // tom applied to this feed's items (overridable per item)
+  fetchIntervalMin Int       @default(15)
+  lastFetchedAt    DateTime?
+  lastStatus       String? // OK | ERROR
+  lastError        String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  defaultTone NewsTone?  @relation(fields: [defaultToneId], references: [id], onDelete: SetNull)
+  items       NewsItem[]
+
+  @@index([isActive])
+  @@map("news_feeds")
+}
+
+// A reusable editorial voice ("tom"). promptText is the style guide injected into
+// the generation step. version bumps on every edit; generated items snapshot the
+// text they were written with (NewsItem.toneSnapshot), so editing a tom never
+// rewrites history.
+model NewsTone {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String? // short admin-facing summary
+  promptText  String // the actual style guide fed to the model
+  version     Int      @default(1)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  feeds NewsFeed[]
+  items NewsItem[]
+
+  @@map("news_tones")
+}
+
+// One news item on the pipeline conveyor. Lifecycle (status):
+//   DISCOVERED     — pulled from RSS, deduped, not yet processed
+//   FILTERED       — auto-filter judged it irrelevant (rescuable via override)
+//   PROCESSING     — claimed by the process cron (extract → generate)
+//   PENDING_REVIEW — generated text awaits human approval (Gate 2)
+//   APPROVED       — approved; export available
+//   REJECTED       — discarded by the reviewer
+//   FAILED         — a step errored (see error)
+// facts holds the structured facts extracted from the source; the generation step
+// sees ONLY facts (never the source prose), so output is original, not paraphrase.
+model NewsItem {
+  id              String    @id @default(cuid())
+  feedId          String?
+  sourceUrl       String
+  sourceGuid      String // dedup key within a feed
+  sourceTitle     String
+  sourceSummary   String? // raw RSS description/content (short teaser)
+  sourceText      String? // full article body fetched from sourceUrl (richer input)
+  publishedAt     DateTime? // from the feed
+  status          String    @default("DISCOVERED")
+  relevanceScore  Float? // 0..1 from the auto-filter
+  relevanceReason String?
+  facts           Json? // extracted structured facts (input to generation)
+  toneId          String?
+  toneSnapshot    String? // tom promptText at generation time
+  toneVersion     Int?
+  generatedText   String? // current best generation (mirrors latest revision)
+  model           String? // model id that produced generatedText
+  error           String?
+  reviewedById    String? // admin who approved/rejected (audit, no FK)
+  reviewedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  feed      NewsFeed?      @relation(fields: [feedId], references: [id], onDelete: SetNull)
+  tone      NewsTone?      @relation(fields: [toneId], references: [id], onDelete: SetNull)
+  revisions NewsRevision[]
+
+  @@unique([feedId, sourceGuid]) // idempotent ingest
+  @@index([status, createdAt])
+  @@map("news_items")
+}
+
+// One generation attempt for an item. The first has guidance=null; each "reprocess
+// with guidance" appends a new revision. Lets the review screen show how the text
+// evolved and which guidance produced what.
+model NewsRevision {
+  id            String   @id @default(cuid())
+  itemId        String
+  attempt       Int // 1-based
+  guidance      String? // reviewer's steer (null on the first attempt)
+  generatedText String
+  toneSnapshot  String?
+  model         String?
+  createdAt     DateTime @default(now())
+
+  item NewsItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId])
+  @@map("news_revisions")
+}
