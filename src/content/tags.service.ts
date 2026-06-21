@@ -73,8 +73,9 @@ export class TagsService {
     return this.prisma.tag.update({
       where: { id },
       data: {
-        ...(dto.name !== undefined && { name: dto.name.trim() }),
-        ...(dto.description !== undefined && { description: dto.description.trim() || null }),
+        ...(dto.name != null && { name: dto.name.trim() }),
+        // description pode chegar null (limpar) — guarda contra null.trim().
+        ...(dto.description !== undefined && { description: dto.description?.trim() || null }),
       },
     });
   }

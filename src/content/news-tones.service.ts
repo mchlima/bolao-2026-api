@@ -55,8 +55,8 @@ export class NewsTonesService {
   async update(id: string, dto: UpdateNewsToneDto): Promise<NewsTone> {
     const tone = await this.getOne(id);
     const data: Prisma.NewsToneUpdateInput = {
-      ...(dto.name !== undefined && { name: dto.name.trim() }),
-      ...(dto.description !== undefined && { description: dto.description.trim() || null }),
+      ...(dto.name != null && { name: dto.name.trim() }),
+      ...(dto.description !== undefined && { description: dto.description?.trim() || null }),
       ...(dto.isActive !== undefined && { isActive: dto.isActive }),
     };
     // Editing the voice bumps the version; items already generated keep their snapshot.

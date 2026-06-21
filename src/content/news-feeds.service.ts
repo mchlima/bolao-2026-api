@@ -64,13 +64,13 @@ export class NewsFeedsService {
     await this.getOne(id);
     if (dto.defaultToneId) await this.assertToneExists(dto.defaultToneId);
     const data: Prisma.NewsFeedUpdateInput = {
-      ...(dto.name !== undefined && { name: dto.name.trim() }),
-      ...(dto.url !== undefined && { url: dto.url.trim() }),
+      ...(dto.name != null && { name: dto.name.trim() }),
+      ...(dto.url != null && { url: dto.url.trim() }),
       ...(dto.type !== undefined && { type: dto.type }),
       ...(dto.config !== undefined && {
         config: (dto.config ?? Prisma.DbNull) as Prisma.InputJsonValue,
       }),
-      ...(dto.sport !== undefined && { sport: dto.sport.trim() }),
+      ...(dto.sport != null && { sport: dto.sport.trim() }),
       ...(dto.focus !== undefined && { focus: dto.focus?.trim() || null }),
       ...(dto.fetchIntervalMin !== undefined && { fetchIntervalMin: dto.fetchIntervalMin }),
       ...(dto.maxAgeHours !== undefined && { maxAgeHours: dto.maxAgeHours }),
