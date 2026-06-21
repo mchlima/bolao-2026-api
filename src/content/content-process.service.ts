@@ -109,7 +109,8 @@ export class ContentProcessService {
             relevanceReason: extracted.reason,
           },
         });
-        await this.settings.addUsage(costUsd(extracted.usage));
+        // Filtrada: custou (extração), mas NÃO é matéria gerada → não conta no volume.
+        await this.settings.addUsage(costUsd(extracted.usage), false);
         return;
       }
 
@@ -143,7 +144,8 @@ export class ContentProcessService {
           },
         }),
       ]);
-      await this.settings.addUsage(costUsd(extracted.usage) + costUsd(gen.usage));
+      // Matéria gerada: soma custo (extração + geração) e conta no volume do dia.
+      await this.settings.addUsage(costUsd(extracted.usage) + costUsd(gen.usage), true);
       this.logger.log(`Item ${id} gerado (tom "${tone.name}").`);
     } catch (err) {
       const message = (err as Error).message?.slice(0, 500) ?? 'erro';
@@ -183,7 +185,8 @@ export class ContentProcessService {
         guidance,
         (await this.settings.getConfig()).generateModel,
       );
-      await this.settings.addUsage(costUsd(gen.usage));
+      // Regeração de matéria já existente: soma custo, mas não conta como nova matéria.
+      await this.settings.addUsage(costUsd(gen.usage), false);
       const last = await this.prisma.newsRevision.aggregate({
         where: { itemId: id },
         _max: { attempt: true },

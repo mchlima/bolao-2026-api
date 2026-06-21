@@ -12,8 +12,8 @@ export interface ContentConfig {
 }
 
 export interface DayUsage {
-  items: number;
-  costUsd: number;
+  items: number; // matérias GERADAS hoje (não conta filtradas) — base do teto de volume
+  costUsd: number; // gasto total do dia (inclui extração de filtradas) — base do teto de US$
 }
 
 const DEFAULTS: ContentConfig = {
@@ -80,10 +80,19 @@ export class ContentSettingsService {
     return { over: false, message: '' };
   }
 
-  async addUsage(costUsd: number): Promise<void> {
+  /**
+   * Record spend. `costUsd` ALWAYS accrues (every model call costs, filtered too).
+   * `items` only counts MATÉRIAS GERADAS — the daily volume cap is about articles
+   * produced, not items processed. Filtered items spend money (caught by the US$
+   * cap) but don't consume the volume cap.
+   */
+  async addUsage(costUsd: number, generated = false): Promise<void> {
     const key = this.usageKey();
     const cur = await this.getTodayUsage();
-    const next: DayUsage = { items: cur.items + 1, costUsd: cur.costUsd + costUsd };
+    const next: DayUsage = {
+      items: cur.items + (generated ? 1 : 0),
+      costUsd: cur.costUsd + costUsd,
+    };
     await this.prisma.appSetting.upsert({
       where: { key },
       update: { value: next as object },
