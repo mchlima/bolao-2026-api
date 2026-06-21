@@ -50,6 +50,8 @@ export interface NewsArticle extends NewsCard {
   keyTakeaways: string[];
   faq: { question: string; answer: string }[];
   updatedAt: string;
+  /** Caminho raiz→folha da categoria (Futebol > Copa do Mundo > 2026), p/ breadcrumb. */
+  categoryPath: TermRef[];
 }
 
 /** Pacote SEO/GEO manual da página de um termo (categoria/tag). */
@@ -167,11 +169,15 @@ export class PublicNewsService {
   async getBySlug(slug: string): Promise<NewsArticle> {
     const it = await this.prisma.newsItem.findFirst({
       where: { slug, status: 'APPROVED' },
-      select: { ...CARD_SELECT, updatedAt: true },
+      select: { ...CARD_SELECT, updatedAt: true, category: { select: { id: true, name: true, slug: true } } },
     });
     if (!it) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Matéria não encontrada.' });
     const seo = (it.seo as Seo | null) ?? {};
     const { title, body } = splitArticle(it.generatedText);
+    // Caminho completo da categoria (ancestrais → folha) p/ o breadcrumb do artigo.
+    const categoryPath: TermRef[] = it.category
+      ? (await this.categories.pathOf(it.category.id)).map((x) => ({ name: x.name, slug: x.slug }))
+      : [];
     return {
       ...this.toCard(it),
       title,
@@ -183,6 +189,7 @@ export class PublicNewsService {
       keyTakeaways: seo.keyTakeaways ?? [],
       faq: seo.faq ?? [],
       updatedAt: it.updatedAt.toISOString(),
+      categoryPath,
     };
   }
 
