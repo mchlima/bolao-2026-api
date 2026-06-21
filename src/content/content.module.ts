@@ -18,9 +18,12 @@ import { AdminNewsTonesController } from './admin-news-tones.controller';
 import { AdminNewsItemsController } from './admin-news-items.controller';
 import { AdminContentSettingsController } from './admin-content-settings.controller';
 import { AdminContentDashboardController } from './admin-content-dashboard.controller';
-import { PublicNewsController } from './public-news.controller';
+import { PublicNewsController, PublicTaxonomyController } from './public-news.controller';
 import { PublicNewsService } from './public-news.service';
+import { AdminTagsController } from './admin-tags.controller';
+import { AdminCategoriesController } from './admin-categories.controller';
 import { TagsService } from './tags.service';
+import { CategoriesService } from './categories.service';
 import { ContentSettingsService } from './content-settings.service';
 
 // Content pipeline: RSS ingest → LLM extract/classify → rewrite in a tom → review.
@@ -33,12 +36,16 @@ import { ContentSettingsService } from './content-settings.service';
     AdminNewsItemsController,
     AdminContentSettingsController,
     AdminContentDashboardController,
+    AdminTagsController,
+    AdminCategoriesController,
     PublicNewsController,
+    PublicTaxonomyController,
   ],
   providers: [
     ContentSettingsService,
     PublicNewsService,
     TagsService,
+    CategoriesService,
     LlmService,
     ArticleFetchService,
     RssConnector,

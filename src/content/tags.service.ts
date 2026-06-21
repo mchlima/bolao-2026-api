@@ -1,12 +1,14 @@
-import { Injectable } from '@nestjs/common';
-import { Tag } from '@prisma/client';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma, Tag } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { Paginated, paginated } from '../common/pagination';
 import { slugify } from './slug.util';
+import { CreateTaxonomyDto, UpdateTaxonomyDto } from './dto/news-taxonomy.dto';
 
 /**
  * Tags são ENTIDADES. A geração só sugere nomes (seo.tags, strings); aqui eles viram
  * registros canônicos: resolve() VALIDA se a tag já existe (por slug) e só CRIA se não —
- * nunca duplica "Brasil"/"brasil"/"BRASIL". Usado na publicação (e ao editar publicado).
+ * nunca duplica "Brasil"/"brasil"/"BRASIL". Tem CRUD no admin + página pública.
  */
 @Injectable()
 export class TagsService {
@@ -33,7 +35,64 @@ export class TagsService {
     return out;
   }
 
-  async list(): Promise<Tag[]> {
-    return this.prisma.tag.findMany({ orderBy: { name: 'asc' } });
+  // ─────────────────────────────────────────────────────────── CRUD (admin)
+
+  async list(page: number, pageSize: number, q?: string): Promise<Paginated<Tag>> {
+    const where: Prisma.TagWhereInput = q?.trim()
+      ? { name: { contains: q.trim(), mode: 'insensitive' } }
+      : {};
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.tag.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: { _count: { select: { items: true } } },
+      }),
+      this.prisma.tag.count({ where }),
+    ]);
+    return paginated(data, total, page, pageSize);
+  }
+
+  async getOne(id: string): Promise<Tag> {
+    const tag = await this.prisma.tag.findUnique({ where: { id } });
+    if (!tag) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Tag não encontrada.' });
+    return tag;
+  }
+
+  async create(dto: CreateTaxonomyDto): Promise<Tag> {
+    const slug = await this.uniqueSlug(slugify(dto.slug?.trim() || dto.name));
+    return this.prisma.tag.create({
+      data: { name: dto.name.trim(), slug, description: dto.description?.trim() || null },
+    });
+  }
+
+  /** Renomeia/descreve — o slug é estável (não muda a URL pública). */
+  async update(id: string, dto: UpdateTaxonomyDto): Promise<Tag> {
+    await this.getOne(id);
+    return this.prisma.tag.update({
+      where: { id },
+      data: {
+        ...(dto.name !== undefined && { name: dto.name.trim() }),
+        ...(dto.description !== undefined && { description: dto.description.trim() || null }),
+      },
+    });
+  }
+
+  async remove(id: string): Promise<void> {
+    await this.getOne(id);
+    // m2m implícito: apagar a tag remove os vínculos (join) automaticamente.
+    await this.prisma.tag.delete({ where: { id } });
+  }
+
+  private async uniqueSlug(base: string): Promise<string> {
+    const root = base || 'tag';
+    let slug = root;
+    for (let i = 2; i < 60; i++) {
+      const exists = await this.prisma.tag.findUnique({ where: { slug } });
+      if (!exists) return slug;
+      slug = `${root}-${i}`;
+    }
+    throw new BadRequestException({ code: 'SLUG_CLASH', message: 'Não consegui gerar um slug único.' });
   }
 }
