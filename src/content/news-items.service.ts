@@ -26,6 +26,7 @@ export class NewsItemsService {
         include: {
           feed: { select: { id: true, name: true } },
           tone: { select: { id: true, name: true } },
+          duplicateOf: { select: { id: true, sourceTitle: true } },
         },
       }),
       this.prisma.newsItem.count({ where }),
@@ -40,6 +41,8 @@ export class NewsItemsService {
         feed: { select: { id: true, name: true } },
         tone: { select: { id: true, name: true } },
         revisions: { orderBy: { attempt: 'desc' } },
+        duplicateOf: { select: { id: true, sourceTitle: true } },
+        duplicates: { select: { id: true, sourceTitle: true, feed: { select: { name: true } } } },
       },
     });
     if (!item) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Item não encontrado.' });
@@ -74,16 +77,20 @@ export class NewsItemsService {
     return this.getOne(id);
   }
 
-  /** Override the auto-filter (or a rejection): generate from the existing facts. */
+  /** Override the auto-filter / a rejection / a dedup suppression: generate from the existing facts. */
   async rescue(id: string, force = false): Promise<NewsItem> {
     const item = await this.getOne(id);
-    if (!['FILTERED', 'REJECTED'].includes(item.status)) {
-      throw new BadRequestException({ code: 'INVALID_STATE', message: 'Só faz sentido resgatar item filtrado ou rejeitado.' });
+    if (!['FILTERED', 'REJECTED', 'DUPLICATE'].includes(item.status)) {
+      throw new BadRequestException({ code: 'INVALID_STATE', message: 'Só faz sentido resgatar item filtrado, rejeitado ou duplicado.' });
     }
     if (!item.facts) {
       throw new BadRequestException({ code: 'NO_FACTS', message: 'Item sem fatos extraídos para gerar.' });
     }
     await this.process.reprocess(id, null, null, force);
+    // Resgatado vira matéria própria — desfaz o vínculo de duplicata.
+    if (item.duplicateOfId) {
+      await this.prisma.newsItem.update({ where: { id }, data: { duplicateOfId: null } });
+    }
     return this.getOne(id);
   }
 

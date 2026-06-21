@@ -114,6 +114,38 @@ export class ContentProcessService {
         return;
       }
 
+      // Dedup entre fontes: se este MESMO acontecimento já virou matéria há pouco,
+      // suprime esta (DUPLICATE) e pula a geração — a extração já foi paga, mas
+      // economizamos o Sonnet. Resgatável depois se o editor quiser gerar mesmo assim.
+      if (extracted.eventKey) {
+        const primary = await this.prisma.newsItem.findFirst({
+          where: {
+            eventKey: extracted.eventKey,
+            id: { not: id },
+            status: { in: ['PENDING_REVIEW', 'APPROVED'] },
+            createdAt: { gte: new Date(Date.now() - MAX_AGE_MS) },
+          },
+          orderBy: { createdAt: 'asc' },
+          select: { id: true, sourceTitle: true },
+        });
+        if (primary) {
+          await this.prisma.newsItem.update({
+            where: { id },
+            data: {
+              status: 'DUPLICATE',
+              eventKey: extracted.eventKey,
+              duplicateOfId: primary.id,
+              facts: extracted.facts as Prisma.InputJsonValue,
+              relevanceScore: extracted.relevanceScore,
+              relevanceReason: `Mesmo assunto de: "${primary.sourceTitle}"`,
+            },
+          });
+          await this.settings.addUsage(costUsd(extracted.usage), false);
+          this.logger.log(`Item ${id} é duplicata de ${primary.id} (${extracted.eventKey}).`);
+          return;
+        }
+      }
+
       const tone = await this.resolveTone(item.toneId, item.feed?.defaultToneId ?? null);
       if (!tone) throw new Error('Nenhum tom ativo configurado para gerar o texto.');
 
@@ -123,6 +155,7 @@ export class ContentProcessService {
           where: { id },
           data: {
             status: 'PENDING_REVIEW',
+            eventKey: extracted.eventKey || null,
             facts: extracted.facts as Prisma.InputJsonValue,
             relevanceScore: extracted.relevanceScore,
             relevanceReason: extracted.reason,

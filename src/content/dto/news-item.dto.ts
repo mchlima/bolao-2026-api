@@ -9,6 +9,7 @@ export const NEWS_ITEM_STATUSES = [
   'APPROVED',
   'REJECTED',
   'FAILED',
+  'DUPLICATE',
 ] as const;
 
 export class ListItemsQueryDto extends PaginationQueryDto {

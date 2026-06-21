@@ -963,6 +963,8 @@ model NewsItem {
   sourceText      String? // full article body fetched from sourceUrl (richer input)
   publishedAt     DateTime? // from the feed
   status          String    @default("DISCOVERED")
+  eventKey        String? // normalized event id (cross-source dedup): same fact = same key
+  duplicateOfId   String? // when status=DUPLICATE, the matéria this repeats
   relevanceScore  Float? // 0..1 from the auto-filter
   relevanceReason String?
   facts           Json? // extracted structured facts (input to generation)
@@ -977,12 +979,15 @@ model NewsItem {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  feed      NewsFeed?      @relation(fields: [feedId], references: [id], onDelete: SetNull)
-  tone      NewsTone?      @relation(fields: [toneId], references: [id], onDelete: SetNull)
-  revisions NewsRevision[]
+  feed        NewsFeed?      @relation(fields: [feedId], references: [id], onDelete: SetNull)
+  tone        NewsTone?      @relation(fields: [toneId], references: [id], onDelete: SetNull)
+  revisions   NewsRevision[]
+  duplicateOf NewsItem?      @relation("ItemDuplicates", fields: [duplicateOfId], references: [id], onDelete: SetNull)
+  duplicates  NewsItem[]     @relation("ItemDuplicates")
 
   @@unique([feedId, sourceGuid]) // idempotent ingest
   @@index([status, createdAt])
+  @@index([eventKey])
   @@map("news_items")
 }
 

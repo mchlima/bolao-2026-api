@@ -37,8 +37,21 @@ export interface ExtractResult {
   isSportsNews: boolean;
   relevanceScore: number; // 0..1
   reason: string;
+  eventKey: string; // normalized cross-source dedup key ('' = couldn't define)
   facts: Record<string, unknown>;
   usage: Usage;
+}
+
+/** Defensive normalization so two sources' keys actually collide (accents/case/spaces). */
+export function normalizeEventKey(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  return raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // strip accents
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-') // anything else → hyphen
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 120);
 }
 
 export interface GenerateResult {
@@ -102,6 +115,7 @@ export class LlmService {
           ? Math.max(0, Math.min(1, parsed.relevanceScore))
           : 0,
       reason: typeof parsed.reason === 'string' ? parsed.reason : '',
+      eventKey: normalizeEventKey(parsed.eventKey),
       facts: parsed.facts ?? {},
       usage: { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens, model: MODEL_EXTRACT },
     };

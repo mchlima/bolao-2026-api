@@ -30,6 +30,17 @@ export const EXTRACT_SYSTEM = [
   '- quotes: TODAS as falas literais atribuíveis, com quem falou. Se não houver, [].',
   '- keyFacts: frases factuais e completas. Sem opinião, sem floreio.',
   '- Se algum campo não existir no texto, devolva string vazia ou lista vazia.',
+  '',
+  'eventKey — IDENTIFICADOR DO ACONTECIMENTO (para juntar a MESMA notícia vinda de',
+  'fontes diferentes). Gere um slug curto, minúsculo, SEM acento, só [a-z0-9-], que',
+  'descreva o FATO CENTRAL de forma canônica — duas notícias sobre o mesmo',
+  'acontecimento DEVEM gerar o mesmo eventKey. Regras:',
+  '- jogo/resultado: "<competicao>-<timeA>-x-<timeB>-<aaaa-mm-dd>" com os times em',
+  '  ORDEM ALFABÉTICA (não importa mando), ex.: "brasileirao-flamengo-x-palmeiras-2026-06-21".',
+  '- contratação/transferência: "transferencia-<jogador>-<clube-destino>".',
+  '- lesão: "lesao-<jogador>". Declaração: "declaracao-<pessoa>-<tema>".',
+  '- Use nomes canônicos curtos (sobrenome do jogador; nome usual do clube/competição).',
+  '- Sem data quando o fato não é datado (contratação/lesão). Se não der pra definir, "".',
 ].join('\n');
 
 export function buildExtractContents(
@@ -61,6 +72,10 @@ export const EXTRACT_SCHEMA = {
     isSportsNews: { type: 'boolean' },
     relevanceScore: { type: 'number', description: '0..1' },
     reason: { type: 'string' },
+    eventKey: {
+      type: 'string',
+      description: 'slug canônico do acontecimento p/ dedup entre fontes; [a-z0-9-], sem acento',
+    },
     facts: {
       type: 'object',
       properties: {
@@ -86,7 +101,7 @@ export const EXTRACT_SCHEMA = {
       required: ['headlineFact', 'keyFacts'],
     },
   },
-  required: ['isSportsNews', 'relevanceScore', 'reason', 'facts'],
+  required: ['isSportsNews', 'relevanceScore', 'reason', 'eventKey', 'facts'],
 } as const;
 
 // ─────────────────────────────────────────────────────── Step 2: generate
