@@ -3,6 +3,7 @@ import { Prisma, Tag } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { Paginated, paginated } from '../common/pagination';
 import { slugify } from './slug.util';
+import { cleanTermSeo } from './term-seo.util';
 import { CreateTaxonomyDto, UpdateTaxonomyDto } from './dto/news-taxonomy.dto';
 
 /**
@@ -63,7 +64,12 @@ export class TagsService {
   async create(dto: CreateTaxonomyDto): Promise<Tag> {
     const slug = await this.uniqueSlug(slugify(dto.slug?.trim() || dto.name));
     return this.prisma.tag.create({
-      data: { name: dto.name.trim(), slug, description: dto.description?.trim() || null },
+      data: {
+        name: dto.name.trim(),
+        slug,
+        description: dto.description?.trim() || null,
+        ...(dto.seo !== undefined && { seo: cleanTermSeo(dto.seo) ?? Prisma.DbNull }),
+      },
     });
   }
 
@@ -76,6 +82,8 @@ export class TagsService {
         ...(dto.name != null && { name: dto.name.trim() }),
         // description pode chegar null (limpar) — guarda contra null.trim().
         ...(dto.description !== undefined && { description: dto.description?.trim() || null }),
+        // seo: undefined = não mexe; {}/null/vazio = limpa (DbNull); senão grava saneado.
+        ...(dto.seo !== undefined && { seo: cleanTermSeo(dto.seo) ?? Prisma.DbNull }),
       },
     });
   }

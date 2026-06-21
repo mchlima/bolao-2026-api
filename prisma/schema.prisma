@@ -1033,6 +1033,7 @@ model Tag {
   name        String // rótulo de exibição (1º a criar define a grafia)
   slug        String     @unique // chave canônica (slugify do nome) p/ dedup/lookup
   description String? // texto de apoio (intro da página de tag, SEO)
+  seo         Json? // metadados SEO/GEO da página da tag (manuais do admin): metaTitle/metaDescription/heading/intro/faq
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   items       NewsItem[] @relation("NewsItemTags")
@@ -1049,6 +1050,7 @@ model Category {
   name        String
   slug        String     @unique
   description String? // intro da página de categoria (SEO)
+  seo         Json? // metadados SEO/GEO da página da categoria (manuais do admin): metaTitle/metaDescription/heading/intro/faq
   parentId    String? // pai na árvore (até 3 níveis); raiz = null
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt

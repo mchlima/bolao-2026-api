@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Category } from '@prisma/client';
+import { Category, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { slugify } from './slug.util';
+import { cleanTermSeo } from './term-seo.util';
 import { CreateTaxonomyDto, UpdateTaxonomyDto } from './dto/news-taxonomy.dto';
 
 export const MAX_CATEGORY_DEPTH = 3;
@@ -16,6 +17,7 @@ export interface CategoryNode {
   depth: number; // 1 = raiz
   pathLabel: string[]; // nomes dos ancestrais + ele (ex.: ["Futebol","Copa do Mundo","2026"])
   items: number;
+  seo: Prisma.JsonValue | null; // pacote SEO/GEO manual (p/ o modal de edição do admin)
 }
 
 /**
@@ -56,7 +58,7 @@ export class CategoriesService {
         const pathLabel = [...prefix, c.name];
         out.push({
           id: c.id, name: c.name, slug: c.slug, description: c.description,
-          parentId: c.parentId, depth, pathLabel, items: c._count.items,
+          parentId: c.parentId, depth, pathLabel, items: c._count.items, seo: c.seo,
         });
         walk(c.id, depth + 1, pathLabel);
       }
@@ -80,6 +82,7 @@ export class CategoriesService {
         slug,
         description: dto.description?.trim() || null,
         parentId: dto.parentId ?? null,
+        ...(dto.seo !== undefined && { seo: cleanTermSeo(dto.seo) ?? Prisma.DbNull }),
       },
     });
   }
@@ -94,6 +97,8 @@ export class CategoriesService {
         // description pode chegar null (limpar) — guarda contra null.trim().
         ...(dto.description !== undefined && { description: dto.description?.trim() || null }),
         ...(dto.parentId !== undefined && { parentId: dto.parentId }),
+        // seo: undefined = não mexe; {}/null/vazio = limpa (DbNull); senão grava saneado.
+        ...(dto.seo !== undefined && { seo: cleanTermSeo(dto.seo) ?? Prisma.DbNull }),
       },
     });
   }

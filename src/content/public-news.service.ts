@@ -52,10 +52,21 @@ export interface NewsArticle extends NewsCard {
   updatedAt: string;
 }
 
+/** Pacote SEO/GEO manual da página de um termo (categoria/tag). */
+export interface TermSeo {
+  metaTitle?: string;
+  metaDescription?: string;
+  heading?: string;
+  intro?: string;
+  faq?: { question: string; answer: string }[];
+}
+
 /** Cabeçalho de uma página de categoria/tag (nome + descrição + total). */
 export interface TermPage extends TermRef {
   description: string | null;
   total: number;
+  /** Metadados SEO/GEO editados à mão pelo admin (manchete/meta/intro/FAQ da página). */
+  seo: TermSeo | null;
   /** Categoria: caminho raiz→nó p/ breadcrumb (Futebol > Copa do Mundo > 2026). */
   path?: TermRef[];
 }
@@ -207,7 +218,7 @@ export class PublicNewsService {
     return cats
       .filter((c) => total.has(c.id))
       .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
-      .map((c) => ({ name: c.name, slug: c.slug, description: c.description, total: total.get(c.id)! }));
+      .map((c) => ({ name: c.name, slug: c.slug, description: c.description, total: total.get(c.id)!, seo: null }));
   }
 
   async listTags(): Promise<TermPage[]> {
@@ -219,13 +230,13 @@ export class PublicNewsService {
         _count: { select: { items: { where: { status: 'APPROVED', slug: { not: null } } } } },
       },
     });
-    return tags.map((t) => ({ name: t.name, slug: t.slug, description: t.description, total: t._count.items }));
+    return tags.map((t) => ({ name: t.name, slug: t.slug, description: t.description, total: t._count.items, seo: null }));
   }
 
   async getCategory(slug: string): Promise<TermPage> {
     const c = await this.prisma.category.findUnique({
       where: { slug },
-      select: { id: true, name: true, slug: true, description: true },
+      select: { id: true, name: true, slug: true, description: true, seo: true },
     });
     if (!c) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Categoria não encontrada.' });
     // total = matérias da categoria E descendentes (a página da pai mostra tudo abaixo).
@@ -238,6 +249,7 @@ export class PublicNewsService {
     const chain = await this.categories.pathOf(c.id);
     return {
       name: c.name, slug: c.slug, description: c.description, total,
+      seo: (c.seo as TermSeo | null) ?? null,
       path: chain.map((x) => ({ name: x.name, slug: x.slug })),
     };
   }
@@ -246,13 +258,13 @@ export class PublicNewsService {
     const t = await this.prisma.tag.findUnique({
       where: { slug },
       select: {
-        name: true, slug: true, description: true,
+        name: true, slug: true, description: true, seo: true,
         _count: { select: { items: { where: { status: 'APPROVED', slug: { not: null } } } } },
       },
     });
     if (!t || t._count.items === 0) {
       throw new NotFoundException({ code: 'NOT_FOUND', message: 'Tag não encontrada.' });
     }
-    return { name: t.name, slug: t.slug, description: t.description, total: t._count.items };
+    return { name: t.name, slug: t.slug, description: t.description, total: t._count.items, seo: (t.seo as TermSeo | null) ?? null };
   }
 }
