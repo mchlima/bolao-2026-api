@@ -358,7 +358,15 @@ export class ContentProcessService {
         guidance,
         cfg.generateModel,
       );
-      const verify = await this.llm.verifyArticle(item.sourceText ?? '', gen.text, cfg.extractModel);
+      // Item generativo (resumo de jogo): audita contra os PRÓPRIOS fatos (sem prosa-
+      // fonte). Senão, contra a fonte original como as notícias de feed.
+      const verify = isGenerativeFeedType(item.feed?.type)
+        ? await this.llm.verifyAgainstFacts(
+            JSON.stringify(item.facts, null, 2),
+            gen.text,
+            cfg.extractModel,
+          )
+        : await this.llm.verifyArticle(item.sourceText ?? '', gen.text, cfg.extractModel);
       // Regeração de matéria já existente: soma custo (geração + verificação), sem contar nova matéria.
       await this.settings.addUsage(costUsd(gen.usage) + costUsd(verify.usage), false);
       const last = await this.prisma.newsRevision.aggregate({
