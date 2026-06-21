@@ -16,6 +16,28 @@ const BATCH = 4;
 // Freshness guard: never rewrite news older than this (the user's hard rule).
 const MAX_AGE_MS = 48 * 3_600_000;
 
+/** Normalized set of entities (teams/people/competition) from the extracted facts. */
+function factEntities(facts: unknown): Set<string> {
+  const set = new Set<string>();
+  if (!facts || typeof facts !== 'object') return set;
+  const f = facts as Record<string, unknown>;
+  const add = (v: unknown) => {
+    if (typeof v !== 'string') return;
+    const n = v
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '');
+    if (n) set.add(n);
+  };
+  for (const key of ['teams', 'people']) {
+    const arr = f[key];
+    if (Array.isArray(arr)) arr.forEach(add);
+  }
+  add(f['competition']);
+  return set;
+}
+
 /**
  * The pipeline engine. A minute cron claims DISCOVERED items (atomically, so it
  * never double-processes) and runs each through extract→generate. Items land in
@@ -126,9 +148,20 @@ export class ContentProcessService {
             createdAt: { gte: new Date(Date.now() - MAX_AGE_MS) },
           },
           orderBy: { createdAt: 'asc' },
-          select: { id: true, sourceTitle: true },
+          select: { id: true, sourceTitle: true, facts: true },
         });
-        if (primary) {
+        // Rede de segurança: a chave pode colidir por engano do modelo. Só trata como
+        // duplicata se as duas notícias compartilharem ao menos uma entidade (time/
+        // pessoa/competição) — senão segue e gera normalmente.
+        const sharesEntity =
+          primary &&
+          (() => {
+            const a = factEntities(extracted.facts);
+            const b = factEntities(primary.facts);
+            for (const e of a) if (b.has(e)) return true;
+            return false;
+          })();
+        if (primary && sharesEntity) {
           await this.prisma.newsItem.update({
             where: { id },
             data: {
