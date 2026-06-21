@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { NewsFeed, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { Paginated, paginated } from '../common/pagination';
-import { ContentIngestService, FeedPreview } from './content-ingest.service';
+import { ContentIngestService, FeedPreview, FetchResult } from './content-ingest.service';
 import { CreateNewsFeedDto, UpdateNewsFeedDto } from './dto/news-feed.dto';
 
 @Injectable()
@@ -91,10 +91,10 @@ export class NewsFeedsService {
     await this.prisma.newsFeed.delete({ where: { id } });
   }
 
-  /** Trigger an immediate fetch; returns # of new items inserted. */
-  async fetchNow(id: string): Promise<{ inserted: number }> {
+  /** Trigger an immediate fetch; returns inserted/found/stale counts. */
+  async fetchNow(id: string): Promise<FetchResult> {
     await this.getOne(id);
-    return { inserted: await this.ingest.fetchFeed(id) };
+    return this.ingest.fetchFeed(id);
   }
 
   /** Validate/preview an RSS URL before saving (admin "testar"). */

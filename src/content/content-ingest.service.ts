@@ -10,6 +10,14 @@ import { ContentSettingsService } from './content-settings.service';
 
 export type { FeedPreview } from './connectors/types';
 
+/** Resultado de uma coleta: inseridos, achados (após conector) e descartados por idade. */
+export interface FetchResult {
+  inserted: number;
+  found: number;
+  stale: number;
+}
+const ZERO: FetchResult = { inserted: 0, found: 0, stale: 0 };
+
 // Ignore items older than this at ingest (only when the source carries a date;
 // undated items are date-checked later, after the article fetch resolves a date).
 const MAX_AGE_HOURS = 48;
@@ -57,13 +65,13 @@ export class ContentIngestService {
   }
 
   /** Fetch one source now via its connector, insert fresh items, stamp health. */
-  async fetchFeed(feedId: string): Promise<number> {
+  async fetchFeed(feedId: string): Promise<FetchResult> {
     const feed = await this.prisma.newsFeed.findUnique({ where: { id: feedId } });
-    if (!feed) return 0;
+    if (!feed) return ZERO;
     const connector = this.connectors[feed.type];
     if (!connector) {
       await this.stampError(feed.id, `Tipo de fonte desconhecido: ${feed.type}`);
-      return 0;
+      return ZERO;
     }
     // Pauta gasta US$ ao buscar (web search). Se o teto do dia já estourou, não
     // busca e avisa claramente — em vez de retornar "0" silencioso. (No cron este
@@ -81,19 +89,19 @@ export class ContentIngestService {
     try {
       const items = await connector.discover(feed);
       const cutoff = Date.now() - MAX_AGE_HOURS * 3_600_000;
-      const rows = items
-        .filter((it) => it.sourceTitle && (it.sourceUrl || it.sourceGuid))
-        // drop items already known to be stale; keep undated ones (dated at processing)
-        .filter((it) => !it.publishedAt || it.publishedAt.getTime() >= cutoff)
-        .map((it) => ({
-          feedId: feed.id,
-          sourceGuid: it.sourceGuid,
-          sourceUrl: it.sourceUrl || it.sourceGuid,
-          sourceTitle: it.sourceTitle.slice(0, 500),
-          sourceSummary: it.sourceSummary,
-          sourceText: it.sourceText,
-          publishedAt: it.publishedAt,
-        }));
+      const valid = items.filter((it) => it.sourceTitle && (it.sourceUrl || it.sourceGuid));
+      // drop items already known to be stale; keep undated ones (dated at processing)
+      const fresh = valid.filter((it) => !it.publishedAt || it.publishedAt.getTime() >= cutoff);
+      const stale = valid.length - fresh.length;
+      const rows = fresh.map((it) => ({
+        feedId: feed.id,
+        sourceGuid: it.sourceGuid,
+        sourceUrl: it.sourceUrl || it.sourceGuid,
+        sourceTitle: it.sourceTitle.slice(0, 500),
+        sourceSummary: it.sourceSummary,
+        sourceText: it.sourceText,
+        publishedAt: it.publishedAt,
+      }));
       const res = await this.prisma.newsItem.createMany({ data: rows, skipDuplicates: true });
       await this.prisma.newsFeed.update({
         where: { id: feed.id },
@@ -102,10 +110,10 @@ export class ContentIngestService {
       if (res.count) {
         this.logger.log(`Fonte "${feed.name}" (${feed.type}): ${res.count} novo(s) item(ns).`);
       }
-      return res.count;
+      return { inserted: res.count, found: valid.length, stale };
     } catch (err) {
       await this.stampError(feed.id, (err as Error).message ?? 'erro desconhecido');
-      return 0;
+      return ZERO;
     }
   }
 

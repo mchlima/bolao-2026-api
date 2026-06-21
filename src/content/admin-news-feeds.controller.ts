@@ -16,7 +16,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Paginated } from '../common/pagination';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
-import { FeedPreview } from './content-ingest.service';
+import { FeedPreview, FetchResult } from './content-ingest.service';
 import { NewsFeedsService } from './news-feeds.service';
 import { CreateNewsFeedDto, PreviewFeedDto, UpdateNewsFeedDto } from './dto/news-feed.dto';
 
@@ -56,7 +56,7 @@ export class AdminNewsFeedsController {
   /** "Buscar agora": immediate fetch, returns # of new items. */
   @Post(':id/fetch')
   @HttpCode(200)
-  fetch(@Param('id') id: string): Promise<{ inserted: number }> {
+  fetch(@Param('id') id: string): Promise<FetchResult> {
     return this.feeds.fetchNow(id);
   }
 
