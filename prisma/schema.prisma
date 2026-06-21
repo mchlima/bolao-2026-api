@@ -994,6 +994,7 @@ model NewsItem {
   revisions   NewsRevision[]
   duplicateOf NewsItem?      @relation("ItemDuplicates", fields: [duplicateOfId], references: [id], onDelete: SetNull)
   duplicates  NewsItem[]     @relation("ItemDuplicates")
+  tags        Tag[]          @relation("NewsItemTags") // entidades canônicas (resolvidas na publicação a partir de seo.tags)
 
   @@unique([feedId, sourceGuid]) // idempotent ingest
   @@index([status, createdAt])
@@ -1019,4 +1020,18 @@ model NewsRevision {
 
   @@index([itemId])
   @@map("news_revisions")
+}
+
+// Tag editorial canônica (entidade). Os artigos guardam sugestões em seo.tags (strings);
+// ao PUBLICAR, cada nome é resolvido aqui por `slug` (find-or-create): valida se já existe
+// e cria só se não — evita duplicar "Brasil"/"brasil". Base p/ páginas de tag (SEO) futuras.
+model Tag {
+  id        String     @id @default(cuid())
+  name      String // rótulo de exibição (1º a criar define a grafia)
+  slug      String     @unique // chave canônica (slugify do nome) p/ dedup/lookup
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  items     NewsItem[] @relation("NewsItemTags")
+
+  @@map("tags")
 }

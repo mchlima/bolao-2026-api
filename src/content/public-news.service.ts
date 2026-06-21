@@ -65,15 +65,18 @@ export class PublicNewsService {
     publishedAt: Date | null;
     createdAt: Date;
     feed: { name: string } | null;
+    tags?: { name: string }[];
   }): NewsCard {
     const seo = (it.seo as Seo | null) ?? {};
     const { title } = splitArticle(it.generatedText);
+    // Tags canônicas (entidades vinculadas na publicação); fallback p/ seo.tags em itens antigos.
+    const linked = (it.tags ?? []).map((t) => t.name);
     return {
       slug: it.slug ?? '',
       title,
       dek: seo.dek ?? '',
       category: seo.category ?? '',
-      tags: seo.tags ?? [],
+      tags: linked.length ? linked : (seo.tags ?? []),
       imageAlt: seo.imageAlt ?? '',
       publishedAt: this.publishedAt(it).toISOString(),
       source: it.feed?.name ?? null,
@@ -96,6 +99,7 @@ export class PublicNewsService {
           slug: true, seo: true, generatedText: true,
           reviewedAt: true, publishedAt: true, createdAt: true,
           feed: { select: { name: true } },
+          tags: { select: { name: true }, orderBy: { name: 'asc' } },
         },
       }),
       this.prisma.newsItem.count({ where }),
@@ -110,6 +114,7 @@ export class PublicNewsService {
         slug: true, seo: true, generatedText: true,
         reviewedAt: true, publishedAt: true, createdAt: true, updatedAt: true,
         feed: { select: { name: true } },
+        tags: { select: { name: true }, orderBy: { name: 'asc' } },
       },
     });
     if (!it) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Matéria não encontrada.' });

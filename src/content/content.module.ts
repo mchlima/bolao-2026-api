@@ -20,6 +20,7 @@ import { AdminContentSettingsController } from './admin-content-settings.control
 import { AdminContentDashboardController } from './admin-content-dashboard.controller';
 import { PublicNewsController } from './public-news.controller';
 import { PublicNewsService } from './public-news.service';
+import { TagsService } from './tags.service';
 import { ContentSettingsService } from './content-settings.service';
 
 // Content pipeline: RSS ingest → LLM extract/classify → rewrite in a tom → review.
@@ -37,6 +38,7 @@ import { ContentSettingsService } from './content-settings.service';
   providers: [
     ContentSettingsService,
     PublicNewsService,
+    TagsService,
     LlmService,
     ArticleFetchService,
     RssConnector,

@@ -4,23 +4,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Paginated, paginated } from '../common/pagination';
 import { ContentProcessService } from './content-process.service';
 import { ListItemsQueryDto, ReprocessItemDto, UpdateItemSeoDto } from './dto/news-item.dto';
-
-function slugify(s: string): string {
-  return (
-    s
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'materia'
-  );
-}
+import { slugify } from './slug.util';
+import { TagsService } from './tags.service';
 
 @Injectable()
 export class NewsItemsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly process: ContentProcessService,
+    private readonly tags: TagsService,
   ) {}
 
   async list(q: ListItemsQueryDto): Promise<Paginated<NewsItem>> {
@@ -68,10 +60,25 @@ export class NewsItemsService {
     // Aprovar = publicar no site. Promove um slug público estável (único) a partir do
     // slug do SEO, com a manchete como fallback. Reusa o existente em reaprovações.
     const slug = item.slug ?? (await this.publicSlug(id, item.seo, item.generatedText));
+    // Tags viram ENTIDADES só ao publicar (rascunho/rejeitado não cria tag): resolve
+    // os nomes de seo.tags por slug (find-or-create) e vincula.
+    const tags = await this.tags.resolve(this.seoTags(item.seo));
     return this.prisma.newsItem.update({
       where: { id },
-      data: { status: 'APPROVED', slug, reviewedById: adminId, reviewedAt: new Date() },
+      data: {
+        status: 'APPROVED',
+        slug,
+        reviewedById: adminId,
+        reviewedAt: new Date(),
+        tags: { set: tags.map((t) => ({ id: t.id })) },
+      },
     });
+  }
+
+  /** Nomes de tag sugeridos no pacote SEO (strings). */
+  private seoTags(seo: Prisma.JsonValue | null): string[] {
+    const t = (seo as { tags?: unknown } | null)?.tags;
+    return Array.isArray(t) ? t.filter((x): x is string => typeof x === 'string') : [];
   }
 
   /** Unique public slug: seo.slug → manchete → fallback, deduped against news_items.slug. */
@@ -132,7 +139,13 @@ export class NewsItemsService {
     const current = (item.seo as Record<string, unknown> | null) ?? {};
     const patch = Object.fromEntries(Object.entries(dto).filter(([, v]) => v !== undefined));
     const merged = { ...current, ...patch } as Prisma.InputJsonValue;
-    return this.prisma.newsItem.update({ where: { id }, data: { seo: merged } });
+    const data: Prisma.NewsItemUpdateInput = { seo: merged };
+    // Se já está publicado e o editor mexeu nas tags, re-resolve e re-vincula as entidades.
+    if (item.status === 'APPROVED' && dto.tags !== undefined) {
+      const tags = await this.tags.resolve(dto.tags);
+      data.tags = { set: tags.map((t) => ({ id: t.id })) };
+    }
+    return this.prisma.newsItem.update({ where: { id }, data });
   }
 
   async remove(id: string): Promise<void> {

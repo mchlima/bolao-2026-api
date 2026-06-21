@@ -11,6 +11,7 @@ import { LlmService, articleAuditText, costUsd } from './llm.service';
 import { ArticleFetchService } from './article-fetch.service';
 import { ContentSettingsService, ContentConfig } from './content-settings.service';
 import { isGenerativeFeedType } from './dto/news-feed.dto';
+import { slugify } from './slug.util';
 
 // Small per-tick batch keeps load gentle and respects provider rate limits.
 const BATCH = 4;
@@ -20,19 +21,6 @@ const DEFAULT_MAX_AGE_HOURS = 48;
 const DEDUP_WINDOW_MS = 48 * 3_600_000;
 // Abaixo disto, o corpo é menu/teaser — sem matéria pra apurar (evita gerar do título).
 const MIN_BODY_CHARS = 400;
-
-/**
- * Normaliza para slug: sem acento, minúsculo, só [a-z0-9-]. PRESERVA os números
- * (placar) e NÃO limita o tamanho (decisão do usuário — slug sem limite).
- */
-function slugify(s: string): string {
-  return s
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
 
 /**
  * Slug canônico de RESUMO DE JOGO, no padrão dos portais (ge.globo/ESPN): o placar é
