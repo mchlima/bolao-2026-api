@@ -43,8 +43,12 @@ export class TopicConnector implements SourceConnector {
     // Custo da descoberta (tokens + buscas) entra no teto de gasto do dia.
     await this.settings.addUsage(searchCostUsd(usage, searchRequests), false);
 
+    // Descarta o que claramente NÃO é notícia (tabela/estatística/wiki/agregador)
+    // antes de gastar extração — a relevância ainda é a rede de segurança final.
+    const articles = results.filter((r) => !looksLikeNonNews(r.url));
+
     const limit = Math.min(Math.max(cfg.maxResults ?? 15, 1), 30);
-    return results.slice(0, limit).map(
+    return articles.slice(0, limit).map(
       (r): DiscoveredItem => ({
         sourceGuid: r.url,
         sourceUrl: r.url,
@@ -62,6 +66,29 @@ export class TopicConnector implements SourceConnector {
  * relative ("14 hours ago", "3 weeks ago"). Parse both so the 48h freshness guard
  * works already at discovery (avoids fetching/extracting clearly-stale pages).
  */
+// Domínios que são dado bruto/agregador/verbete — quase nunca matéria.
+const NON_NEWS_DOMAINS = [
+  'wikipedia.org', 'sofascore.com', 'flashscore', '365scores', 'fbref.com',
+  'whoscored.com', 'fotmob.com', 'besoccer.com', 'footystats', 'oddspedia',
+];
+// Trechos de caminho típicos de página-índice (tabela, elenco, agenda...).
+const NON_NEWS_PATHS = [
+  '/tabela', '/classificacao', '/classificação', '/estatisticas', '/estatísticas',
+  '/stats', '/standings', '/table', '/elenco', '/calendario', '/calendário', '/agenda',
+];
+
+/** Heurística: a URL aparenta NÃO ser uma matéria jornalística? */
+function looksLikeNonNews(url: string): boolean {
+  const u = url.toLowerCase();
+  if (NON_NEWS_DOMAINS.some((d) => u.includes(d))) return true;
+  try {
+    const path = new URL(url).pathname.toLowerCase();
+    return NON_NEWS_PATHS.some((p) => path.includes(p));
+  } catch {
+    return false;
+  }
+}
+
 const REL_MS: Record<string, number> = {
   second: 1_000, minute: 60_000, hour: 3_600_000, day: 86_400_000,
   week: 604_800_000, month: 2_592_000_000, year: 31_536_000_000,

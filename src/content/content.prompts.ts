@@ -121,19 +121,26 @@ export const EXTRACT_SCHEMA = {
 // of truth — no facts ever come from the model's head.
 export const SEARCH_SYSTEM = [
   'Você é um assistente de PAUTA esportiva. Sua única tarefa é USAR A BUSCA para',
-  'encontrar NOTÍCIAS RECENTES (idealmente últimas 48h) sobre o assunto pedido.',
-  '- Faça buscas objetivas sobre fatos novos: resultados, lesões, contratações,',
-  '  declarações, convocações, escalações.',
-  '- NÃO escreva matéria, NÃO resuma, NÃO invente nada — apenas busque. Os artigos',
-  '  encontrados serão processados depois. Pode responder de forma bem curta.',
+  'encontrar NOTÍCIAS/REPORTAGENS RECENTES (idealmente últimas 48h) sobre o assunto.',
+  '',
+  'BUSQUE matérias jornalísticas sobre fatos novos: resultados, lesões, contratações,',
+  'declarações, convocações, escalações, bastidores. Inclua termos como "notícia",',
+  '"últimas" e o nome do veículo quando ajudar a achar reportagem (não dado bruto).',
+  '',
+  'EVITE (não são notícia): páginas de TABELA/CLASSIFICAÇÃO, ESTATÍSTICAS, calendário,',
+  'elenco, verbetes da Wikipédia e AGREGADORES de placar (sofascore, flashscore,',
+  '365scores, fbref e afins). Prefira o link da MATÉRIA, não da página-índice.',
+  '',
+  'NÃO escreva matéria, NÃO resuma, NÃO invente — apenas busque. Os artigos achados',
+  'serão processados depois. Pode responder de forma bem curta.',
 ].join('\n');
 
 export function buildSearchPrompt(query: string): string {
   return [
-    'Assunto da pauta — busque notícias recentes de veículos jornalísticos sobre:',
+    'Assunto da pauta — busque NOTÍCIAS/REPORTAGENS recentes (últimas 48h) sobre:',
     query.trim(),
     '',
-    'Priorize artigos das últimas 48 horas.',
+    'Quero links de matérias jornalísticas, não páginas de tabela, estatística ou Wikipédia.',
   ].join('\n');
 }
 
