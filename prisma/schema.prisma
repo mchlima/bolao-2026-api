@@ -974,6 +974,8 @@ model NewsItem {
   toneVersion     Int?
   generatedText   String? // current best generation (mirrors latest revision)
   model           String? // model id that produced generatedText
+  verifyOk        Boolean? // auditoria de fidelidade: true=tudo com lastro, false=tem alerta, null=não checado
+  verifyNotes     String? // motivos da auditoria (afirmações sem lastro), uma por linha
   error           String?
   reviewedById    String? // admin who approved/rejected (audit, no FK)
   reviewedAt      DateTime?

@@ -23,12 +23,20 @@ export const EXTRACT_SYSTEM = [
   '  a esse foco: notícia que bate com o foco → nota alta; fora do foco → nota baixa',
   '  (mesmo sendo futebol legítimo). Sem foco, pontue pela relevância geral.',
   '- Extraia SÓ o que está no texto. NÃO invente, não complete, não deduza placar.',
-  '- SEJA EXAUSTIVO: capture TODOS os fatos concretos do corpo — números, nomes,',
-  '  datas, estatísticas, sequências, lesões, contexto (próximo jogo, situação na',
-  '  tabela), reações. keyFacts deve ter UMA frase por fato; quanto mais rico o',
-  '  texto, mais itens (não resuma a 2-3 bullets se o texto traz mais).',
-  '- quotes: TODAS as falas literais atribuíveis, com quem falou. Se não houver, [].',
-  '- keyFacts: frases factuais e completas. Sem opinião, sem floreio.',
+  '  NUNCA acrescente um nome ou detalhe ausente: se o texto diz só "Room", use "Room"',
+  '  (não invente primeiro nome). Nome/número/data só se estiver LITERALMENTE no texto.',
+  '',
+  '  ═══ APENAS FATO DURO (anti-derivação) ═══',
+  '- Capture só FATOS VERIFICÁVEIS: placar, gols, eventos do jogo, estatísticas, jogadores/',
+  '  técnicos, lesões, contratações, classificação, datas, dados de contexto (demografia, números).',
+  '- É PROIBIDO capturar a EXPRESSÃO/CURADORIA de OUTROS VEÍCULOS de imprensa: NÃO registre',
+  '  o que "o Marca/AS/Olé/ESPN disse", nem frases editoriais/opinativas deles ("resistência',
+  '  caribenha", "atuação memorável"). Isso é expressão alheia, não fato — fica de fora.',
+  '- quotes: SOMENTE falas de PESSOAS do fato (jogador, técnico, dirigente), com quem falou.',
+  '  NUNCA aspas/frases de jornais ou veículos. Se não houver fala de pessoa, [].',
+  '- keyFacts: frases factuais e neutras, com SUAS palavras (não copie a frase da fonte).',
+  '  Capture todos os fatos duros; mas se o texto é só repercussão/opinião de imprensa,',
+  '  pode sobrar pouco fato — tudo bem, melhor poucos fatos do que copiar a curadoria alheia.',
   '- Se algum campo não existir no texto, devolva string vazia ou lista vazia.',
   '',
   'eventKey — IDENTIFICADOR DO ACONTECIMENTO (para juntar a MESMA notícia vinda de',
@@ -191,3 +199,38 @@ export function buildGenerateContents(
   }
   return parts.join('\n');
 }
+
+// ─────────────────────────────────────── Step 3: faithfulness check
+
+// Confere o texto gerado contra os fatos. Não reescreve — só audita. Sinaliza
+// qualquer afirmação sem lastro (invenção, dedução não declarada, nome/número novo,
+// aspas de veículo) pra matéria ir pra revisão com o motivo apontado.
+export const VERIFY_SYSTEM = [
+  'Você é um AUDITOR de fidelidade factual, em português do Brasil. Recebe os FATOS',
+  '(JSON, a única verdade) e um TEXTO gerado a partir deles. NÃO reescreva o texto.',
+  '',
+  'Sua tarefa: listar TODA afirmação do TEXTO que NÃO esteja sustentada pelos FATOS —',
+  'invenção, dedução de consequência não declarada (ex.: dizer que um time "foi',
+  'eliminado" ou "enfrenta X depois" sem isso nos fatos), nome/número/data novo, ou',
+  'aspas/frase atribuída a veículo de imprensa.',
+  '',
+  'Responda via a ferramenta record_check: ok=true só se TUDO tiver lastro; senão',
+  'ok=false e issues com uma frase curta por problema (citando o trecho). Seja rigoroso.',
+].join('\n');
+
+export function buildVerifyContents(facts: Record<string, unknown>, text: string): string {
+  return ['FATOS:', JSON.stringify(facts, null, 2), '', 'TEXTO GERADO:', text.trim()].join('\n');
+}
+
+export const VERIFY_SCHEMA = {
+  type: 'object',
+  properties: {
+    ok: { type: 'boolean', description: 'true se toda afirmação do texto tem lastro nos fatos' },
+    issues: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'uma frase curta por afirmação sem lastro (vazio se ok=true)',
+    },
+  },
+  required: ['ok', 'issues'],
+} as const;

@@ -5,10 +5,13 @@ import {
   EXTRACT_SCHEMA,
   EXTRACT_SYSTEM,
   SEARCH_SYSTEM,
+  VERIFY_SCHEMA,
+  VERIFY_SYSTEM,
   buildExtractContents,
   buildGenerateContents,
   buildGenerateSystem,
   buildSearchPrompt,
+  buildVerifyContents,
 } from './content.prompts';
 
 // Cheap/fast model classifies + extracts; a stronger one writes the article.
@@ -216,6 +219,39 @@ export class LlmService {
       text,
       model,
       usage: { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens, model },
+    };
+  }
+
+  /** Audit the generated text against the facts; flags any unsupported claim. */
+  async verifyArticle(
+    facts: Record<string, unknown>,
+    text: string,
+  ): Promise<{ ok: boolean; issues: string[]; usage: Usage }> {
+    const client = this.assertClient();
+    const res = await client.messages.create({
+      model: MODEL_EXTRACT,
+      max_tokens: 1024,
+      system: VERIFY_SYSTEM,
+      messages: [{ role: 'user', content: buildVerifyContents(facts, text) }],
+      tools: [
+        {
+          name: 'record_check',
+          description: 'Registra o resultado da auditoria de fidelidade.',
+          input_schema: VERIFY_SCHEMA as unknown as Anthropic.Tool['input_schema'],
+        },
+      ],
+      tool_choice: { type: 'tool', name: 'record_check' },
+    });
+    const tool = res.content.find((b) => b.type === 'tool_use');
+    const parsed =
+      tool && tool.type === 'tool_use' ? (tool.input as { ok?: boolean; issues?: unknown }) : {};
+    const issues = Array.isArray(parsed.issues)
+      ? parsed.issues.filter((i): i is string => typeof i === 'string')
+      : [];
+    return {
+      ok: parsed.ok === true && issues.length === 0,
+      issues,
+      usage: { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens, model: MODEL_EXTRACT },
     };
   }
 
