@@ -36,6 +36,7 @@ export class ContentIngestService {
   private readonly logger = new Logger(ContentIngestService.name);
   private readonly connectors: Record<string, SourceConnector>;
   private readonly rss: RssConnector;
+  private ticking = false; // evita sobreposição se uma volta de coleta passar de 1 min
 
   constructor(
     private readonly prisma: PrismaService,
@@ -56,16 +57,25 @@ export class ContentIngestService {
     };
   }
 
-  @Cron(CronExpression.EVERY_5_MINUTES)
+  // Tica a cada MINUTO; quem manda na cadência é o intervalo de CADA fonte
+  // (lastFetchedAt + fetchIntervalMin). Assim o intervalo da fonte vale de verdade
+  // até 1 min — o tique é só o relógio fino, a fonte decide se já venceu.
+  @Cron(CronExpression.EVERY_MINUTE)
   async tick(): Promise<void> {
+    if (this.ticking) return; // não sobrepõe se a volta anterior ainda roda
     if (await this.settings.isPaused()) return; // master switch (admin)
-    const now = Date.now();
-    const feeds = await this.prisma.newsFeed.findMany({ where: { isActive: true } });
-    for (const feed of feeds) {
-      const dueAt = feed.lastFetchedAt
-        ? feed.lastFetchedAt.getTime() + feed.fetchIntervalMin * 60_000
-        : 0;
-      if (dueAt <= now) await this.fetchFeed(feed.id).catch(() => undefined);
+    this.ticking = true;
+    try {
+      const now = Date.now();
+      const feeds = await this.prisma.newsFeed.findMany({ where: { isActive: true } });
+      for (const feed of feeds) {
+        const dueAt = feed.lastFetchedAt
+          ? feed.lastFetchedAt.getTime() + feed.fetchIntervalMin * 60_000
+          : 0;
+        if (dueAt <= now) await this.fetchFeed(feed.id).catch(() => undefined);
+      }
+    } finally {
+      this.ticking = false;
     }
   }
 
