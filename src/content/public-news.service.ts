@@ -67,6 +67,8 @@ export interface TermPage extends TermRef {
   total: number;
   /** Metadados SEO/GEO editados à mão pelo admin (manchete/meta/intro/FAQ da página). */
   seo: TermSeo | null;
+  /** Listagem de categorias: slug do pai na árvore (p/ montar o menu hierárquico). */
+  parentSlug?: string | null;
   /** Categoria: caminho raiz→nó p/ breadcrumb (Futebol > Copa do Mundo > 2026). */
   path?: TermRef[];
 }
@@ -218,7 +220,11 @@ export class PublicNewsService {
     return cats
       .filter((c) => total.has(c.id))
       .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
-      .map((c) => ({ name: c.name, slug: c.slug, description: c.description, total: total.get(c.id)!, seo: null }));
+      .map((c) => ({
+        name: c.name, slug: c.slug, description: c.description, total: total.get(c.id)!, seo: null,
+        // slug do pai (não o id) p/ o front montar a árvore do menu sem expor ids.
+        parentSlug: c.parentId ? (byId.get(c.parentId)?.slug ?? null) : null,
+      }));
   }
 
   async listTags(): Promise<TermPage[]> {
