@@ -1040,16 +1040,22 @@ model Tag {
   @@map("tags")
 }
 
-// Categoria editorial canônica (entidade). 1 artigo → 1 categoria (many-to-one). Resolvida
-// na publicação a partir de seo.category (find-or-create por slug). CRUD no admin + página pública.
+// Categoria editorial canônica (entidade). 1 artigo → 1 categoria (many-to-one). HIERÁRQUICA
+// até 3 níveis (ex.: Futebol > Copa do Mundo > 2026) via parentId — URL plana pelo slug único,
+// hierarquia no breadcrumb. Auto-criada na publicação a partir de seo.category (find-or-create)
+// como nó raiz; o admin organiza a árvore. CRUD no admin + página pública.
 model Category {
   id          String     @id @default(cuid())
   name        String
   slug        String     @unique
   description String? // intro da página de categoria (SEO)
+  parentId    String? // pai na árvore (até 3 níveis); raiz = null
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
+  parent      Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Category[] @relation("CategoryTree")
   items       NewsItem[]
 
+  @@index([parentId])
   @@map("categories")
 }

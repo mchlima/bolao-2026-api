@@ -3,7 +3,7 @@ import { NewsItem, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { Paginated, paginated } from '../common/pagination';
 import { ContentProcessService } from './content-process.service';
-import { ListItemsQueryDto, ReprocessItemDto, UpdateItemSeoDto } from './dto/news-item.dto';
+import { ListItemsQueryDto, ReprocessItemDto, UpdateItemSeoDto, UpdateItemTaxonomyDto } from './dto/news-item.dto';
 import { slugify } from './slug.util';
 import { TagsService } from './tags.service';
 import { CategoriesService } from './categories.service';
@@ -45,6 +45,8 @@ export class NewsItemsService {
       include: {
         feed: { select: { id: true, name: true } },
         tone: { select: { id: true, name: true } },
+        category: { select: { id: true, name: true, slug: true } },
+        tags: { select: { id: true, name: true, slug: true }, orderBy: { name: 'asc' } },
         revisions: { orderBy: { attempt: 'desc' } },
         duplicateOf: { select: { id: true, sourceTitle: true } },
         duplicates: { select: { id: true, sourceTitle: true, feed: { select: { name: true } } } },
@@ -62,21 +64,35 @@ export class NewsItemsService {
     // Aprovar = publicar no site. Promove um slug público estável (único) a partir do
     // slug do SEO, com a manchete como fallback. Reusa o existente em reaprovações.
     const slug = item.slug ?? (await this.publicSlug(id, item.seo, item.generatedText));
-    // Tags/categoria viram ENTIDADES só ao publicar (rascunho/rejeitado não cria nada):
-    // resolve os nomes de seo.tags/seo.category por slug (find-or-create) e vincula.
-    const tags = await this.tags.resolve(this.seoTags(item.seo));
-    const category = await this.categories.resolve(this.seoCategory(item.seo));
-    return this.prisma.newsItem.update({
-      where: { id },
-      data: {
-        status: 'APPROVED',
-        slug,
-        reviewedById: adminId,
-        reviewedAt: new Date(),
-        tags: { set: tags.map((t) => ({ id: t.id })) },
-        category: category ? { connect: { id: category.id } } : { disconnect: true },
-      },
-    });
+    const data: Prisma.NewsItemUpdateInput = {
+      status: 'APPROVED', slug, reviewedById: adminId, reviewedAt: new Date(),
+    };
+    // Taxonomia: respeita a SELEÇÃO do admin (feita na revisão). Se ele não escolheu nada,
+    // cai no auto-resolve dos nomes sugeridos (seo.*) — esteira hands-off continua funcionando.
+    const linkedTags = (item as { tags?: { id: string }[] }).tags ?? [];
+    if (!linkedTags.length) {
+      const tags = await this.tags.resolve(this.seoTags(item.seo));
+      if (tags.length) data.tags = { set: tags.map((t) => ({ id: t.id })) };
+    }
+    if (!item.categoryId) {
+      const category = await this.categories.resolve(this.seoCategory(item.seo));
+      if (category) data.category = { connect: { id: category.id } };
+    }
+    return this.prisma.newsItem.update({ where: { id }, data });
+  }
+
+  /** Admin seleciona categoria + tags (entidades) na revisão — sobrepõe os sugeridos. */
+  async updateTaxonomy(id: string, dto: UpdateItemTaxonomyDto): Promise<NewsItem> {
+    await this.getOne(id);
+    const data: Prisma.NewsItemUpdateInput = {};
+    if (dto.categoryId !== undefined) {
+      data.category = dto.categoryId ? { connect: { id: dto.categoryId } } : { disconnect: true };
+    }
+    if (dto.tagIds !== undefined) {
+      data.tags = { set: dto.tagIds.map((tid) => ({ id: tid })) };
+    }
+    await this.prisma.newsItem.update({ where: { id }, data });
+    return this.getOne(id);
   }
 
   /** Nomes de tag sugeridos no pacote SEO (strings). */
@@ -149,17 +165,9 @@ export class NewsItemsService {
     const current = (item.seo as Record<string, unknown> | null) ?? {};
     const patch = Object.fromEntries(Object.entries(dto).filter(([, v]) => v !== undefined));
     const merged = { ...current, ...patch } as Prisma.InputJsonValue;
-    const data: Prisma.NewsItemUpdateInput = { seo: merged };
-    // Se já está publicado e o editor mexeu nas tags/categoria, re-resolve e re-vincula.
-    if (item.status === 'APPROVED' && dto.tags !== undefined) {
-      const tags = await this.tags.resolve(dto.tags);
-      data.tags = { set: tags.map((t) => ({ id: t.id })) };
-    }
-    if (item.status === 'APPROVED' && dto.category !== undefined) {
-      const category = await this.categories.resolve(dto.category);
-      data.category = category ? { connect: { id: category.id } } : { disconnect: true };
-    }
-    return this.prisma.newsItem.update({ where: { id }, data });
+    // seo guarda só os METADADOS (strings sugeridas). O VÍNCULO de categoria/tags-entidade
+    // é feito pelo endpoint dedicado updateTaxonomy (seleção do admin) / pelo approve.
+    return this.prisma.newsItem.update({ where: { id }, data: { seo: merged } });
   }
 
   async remove(id: string): Promise<void> {

@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -18,7 +19,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Paginated } from '../common/pagination';
 import type { SafeUser } from '../users/user.types';
 import { NewsItemsService } from './news-items.service';
-import { ListItemsQueryDto, ReprocessItemDto, UpdateItemSeoDto } from './dto/news-item.dto';
+import { ListItemsQueryDto, ReprocessItemDto, UpdateItemSeoDto, UpdateItemTaxonomyDto } from './dto/news-item.dto';
 
 @Controller('admin/content/items')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -55,6 +56,12 @@ export class AdminNewsItemsController {
   @Patch(':id/seo')
   updateSeo(@Param('id') id: string, @Body() dto: UpdateItemSeoDto): Promise<NewsItem> {
     return this.items.updateSeo(id, dto);
+  }
+
+  /** Admin seleciona categoria + tags (entidades) na revisão. */
+  @Put(':id/taxonomy')
+  updateTaxonomy(@Param('id') id: string, @Body() dto: UpdateItemTaxonomyDto): Promise<NewsItem> {
+    return this.items.updateTaxonomy(id, dto);
   }
 
   /** Re-generate with an editor steer (appends a revision). */

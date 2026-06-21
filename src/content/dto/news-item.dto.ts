@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsString,
   MaxLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -65,6 +66,20 @@ export class UpdateItemSeoDto {
   @ValidateNested({ each: true })
   @Type(() => FaqEntryDto)
   faq?: FaqEntryDto[];
+}
+
+/** Seleção de taxonomia do item na revisão: categoria (entidade) + tags (entidades). */
+export class UpdateItemTaxonomyDto {
+  @IsOptional()
+  @ValidateIf((o) => o.categoryId !== null)
+  @IsString()
+  categoryId?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  tagIds?: string[];
 }
 
 export class ReprocessItemDto {

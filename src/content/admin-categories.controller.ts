@@ -1,13 +1,12 @@
 import {
-  Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards,
+  Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, UseGuards,
 } from '@nestjs/common';
 import { Category, UserRole } from '@prisma/client';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { Paginated } from '../common/pagination';
-import { CategoriesService } from './categories.service';
-import { CreateTaxonomyDto, ListTaxonomyQueryDto, UpdateTaxonomyDto } from './dto/news-taxonomy.dto';
+import { CategoriesService, CategoryNode } from './categories.service';
+import { CreateTaxonomyDto, UpdateTaxonomyDto } from './dto/news-taxonomy.dto';
 
 @Controller('admin/content/categories')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -15,9 +14,10 @@ import { CreateTaxonomyDto, ListTaxonomyQueryDto, UpdateTaxonomyDto } from './dt
 export class AdminCategoriesController {
   constructor(private readonly categories: CategoriesService) {}
 
+  /** Árvore completa (lista achatada em DFS, com profundidade/caminho/contagem). */
   @Get()
-  list(@Query() q: ListTaxonomyQueryDto): Promise<Paginated<Category>> {
-    return this.categories.list(q.page, q.pageSize, q.q);
+  tree(): Promise<CategoryNode[]> {
+    return this.categories.tree();
   }
 
   @Post()
