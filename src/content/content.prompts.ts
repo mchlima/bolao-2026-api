@@ -257,3 +257,50 @@ export const VERIFY_SCHEMA = {
   },
   required: ['issues', 'derivative'],
 } as const;
+
+// ─────────────────────────────────────── Step 3 (variante): fontes generativas
+//
+// Para matéria gerada a partir dos NOSSOS FATOS estruturados (ex.: resumo de partida),
+// não existe prosa-fonte de terceiro: a "fonte" é o próprio JSON de fatos. Então só
+// faz sentido auditar FIDELIDADE (invenção/contradição) — NÃO derivação (reusar
+// placar/nomes/minutos dos fatos é o esperado, não um problema).
+export const VERIFY_FACTS_SYSTEM = [
+  'Você é um AUDITOR editorial rigoroso, em português do Brasil. Recebe um conjunto de',
+  'FATOS estruturados (JSON, a verdade) e um TEXTO gerado a partir deles. NÃO reescreva —',
+  'só audite a FIDELIDADE aos fatos.',
+  '',
+  'Liste em issues TODA afirmação do TEXTO que NÃO se sustente nos FATOS ou que os',
+  'CONTRADIGA: competição, placar, nome, número, minuto, data ou colocação na tabela',
+  'trocados/inventados; e DEDUÇÃO de consequência que os fatos não suportam (ex.: "foi',
+  'eliminado", "está classificado", "enfrenta X na próxima fase").',
+  '',
+  'IMPORTANTE: reaproveitar os dados dos FATOS (placar, nomes, minutos, assistências,',
+  'estatísticas, tabela) é o ESPERADO e NÃO é problema — não aponte isso. Ler diretamente',
+  'um valor da tabela (ex.: "venceu" quando os fatos mostram 1 vitória) é fiel, não é',
+  'invenção. Só liste o que de fato NÃO tem lastro nos FATOS.',
+  '',
+  'Responda via record_check: issues (uma frase curta por problema, citando o trecho; []',
+  'se nenhum).',
+].join('\n');
+
+export function buildVerifyFactsContents(factsJson: string, text: string): string {
+  return [
+    'FATOS (a verdade):',
+    factsJson.trim().slice(0, 12000),
+    '',
+    'TEXTO GERADO (a auditar):',
+    text.trim(),
+  ].join('\n');
+}
+
+export const VERIFY_FACTS_SCHEMA = {
+  type: 'object',
+  properties: {
+    issues: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'afirmações do texto sem lastro nos fatos ou que os contradizem; [] se nenhuma',
+    },
+  },
+  required: ['issues'],
+} as const;

@@ -1,12 +1,15 @@
 import { Module } from '@nestjs/common';
+import { StructureModule } from '../structure/structure.module';
 import { LlmService } from './llm.service';
 import { ArticleFetchService } from './article-fetch.service';
 import { ContentIngestService } from './content-ingest.service';
 import { ContentProcessService } from './content-process.service';
+import { MatchFactPackService } from './match-fact-pack.service';
 import { RssConnector } from './connectors/rss.connector';
 import { NewsApiConnector } from './connectors/news-api.connector';
 import { PageConnector } from './connectors/page.connector';
 import { TopicConnector } from './connectors/topic.connector';
+import { MatchReportConnector } from './connectors/match-report.connector';
 import { NewsFeedsService } from './news-feeds.service';
 import { NewsTonesService } from './news-tones.service';
 import { NewsItemsService } from './news-items.service';
@@ -20,6 +23,7 @@ import { ContentSettingsService } from './content-settings.service';
 // Content pipeline: RSS ingest → LLM extract/classify → rewrite in a tom → review.
 // Engine (ingest/process crons) + admin CRUD for feeds, tons and items.
 @Module({
+  imports: [StructureModule],
   controllers: [
     AdminNewsFeedsController,
     AdminNewsTonesController,
@@ -35,6 +39,8 @@ import { ContentSettingsService } from './content-settings.service';
     NewsApiConnector,
     PageConnector,
     TopicConnector,
+    MatchReportConnector,
+    MatchFactPackService,
     ContentIngestService,
     ContentProcessService,
     NewsFeedsService,

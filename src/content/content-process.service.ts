@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LlmService, costUsd } from './llm.service';
 import { ArticleFetchService } from './article-fetch.service';
 import { ContentSettingsService, ContentConfig } from './content-settings.service';
+import { isGenerativeFeedType } from './dto/news-feed.dto';
 
 // Small per-tick batch keeps load gentle and respects provider rate limits.
 const BATCH = 4;
@@ -103,6 +104,14 @@ export class ContentProcessService {
     if (!item) return;
 
     try {
+      // Fonte generativa (ex.: MATCH_REPORT): os fatos já vieram prontos do conector
+      // (lendo o nosso banco). Pula fetch/extração/dedup e gera direto, auditando
+      // contra os próprios fatos estruturados — não há prosa-fonte de terceiro.
+      if (isGenerativeFeedType(item.feed?.type)) {
+        await this.generateFromFacts(item, conf);
+        return;
+      }
+
       // Prefer the connector's full body (RSS content:encoded, API content);
       // otherwise fetch the article page (RSS teaser, crawled pages).
       let body = item.sourceText;
@@ -259,6 +268,62 @@ export class ContentProcessService {
       await this.prisma.newsItem.update({ where: { id }, data: { status: 'FAILED', error: message } });
       this.logger.warn(`Item ${id} falhou: ${message}`);
     }
+  }
+
+  /**
+   * Geração de fonte generativa: os fatos já estão no item (montados pelo conector a
+   * partir do banco). Sem extração nem fetch — só gera no tom e audita contra os
+   * próprios fatos (pega invenção; não há "derivação" pois não existe prosa-fonte).
+   */
+  private async generateFromFacts(
+    item: {
+      id: string;
+      facts: Prisma.JsonValue | null;
+      toneId: string | null;
+      feed: { defaultToneId: string | null } | null;
+    },
+    conf: ContentConfig,
+  ): Promise<void> {
+    const facts = item.facts as Record<string, unknown> | null;
+    if (!facts || !Object.keys(facts).length) {
+      throw new Error('Fonte generativa sem fatos no item.');
+    }
+    const tone = await this.resolveTone(item.toneId, item.feed?.defaultToneId ?? null);
+    if (!tone) throw new Error('Nenhum tom ativo configurado para gerar o texto.');
+
+    const gen = await this.llm.generateArticle(facts, tone.promptText, null, conf.generateModel);
+    const verify = await this.llm.verifyAgainstFacts(
+      JSON.stringify(facts, null, 2),
+      gen.text,
+      conf.extractModel,
+    );
+    await this.prisma.$transaction([
+      this.prisma.newsItem.update({
+        where: { id: item.id },
+        data: {
+          status: 'PENDING_REVIEW',
+          toneId: tone.id,
+          toneSnapshot: tone.promptText,
+          toneVersion: tone.version,
+          generatedText: gen.text,
+          model: gen.model,
+          verifyOk: verify.ok,
+          verifyNotes: verify.notes,
+        },
+      }),
+      this.prisma.newsRevision.create({
+        data: {
+          itemId: item.id,
+          attempt: 1,
+          guidance: null,
+          generatedText: gen.text,
+          toneSnapshot: tone.promptText,
+          model: gen.model,
+        },
+      }),
+    ]);
+    await this.settings.addUsage(costUsd(gen.usage) + costUsd(verify.usage), true);
+    this.logger.log(`Item ${item.id} gerado do banco (tom "${tone.name}").`);
   }
 
   /** Re-run ONLY generation with an optional editor steer; appends a revision. */

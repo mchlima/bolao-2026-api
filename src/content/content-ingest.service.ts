@@ -1,11 +1,13 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SourceConnector, FeedPreview } from './connectors/types';
 import { RssConnector } from './connectors/rss.connector';
 import { NewsApiConnector } from './connectors/news-api.connector';
 import { PageConnector } from './connectors/page.connector';
 import { TopicConnector } from './connectors/topic.connector';
+import { MatchReportConnector } from './connectors/match-report.connector';
 import { ContentSettingsService } from './content-settings.service';
 
 export type { FeedPreview } from './connectors/types';
@@ -42,6 +44,7 @@ export class ContentIngestService {
     newsApi: NewsApiConnector,
     page: PageConnector,
     topic: TopicConnector,
+    matchReport: MatchReportConnector,
   ) {
     this.rss = rss;
     this.connectors = {
@@ -49,6 +52,7 @@ export class ContentIngestService {
       [newsApi.type]: newsApi,
       [page.type]: page,
       [topic.type]: topic,
+      [matchReport.type]: matchReport,
     };
   }
 
@@ -102,6 +106,9 @@ export class ContentIngestService {
         sourceSummary: it.sourceSummary,
         sourceText: it.sourceText,
         publishedAt: it.publishedAt,
+        // Fontes generativas já trazem fatos prontos + a partida que cobrem.
+        matchId: it.matchId ?? null,
+        ...(it.facts ? { facts: it.facts as Prisma.InputJsonValue } : {}),
       }));
       const res = await this.prisma.newsItem.createMany({ data: rows, skipDuplicates: true });
       await this.prisma.newsFeed.update({

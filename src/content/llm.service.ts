@@ -7,11 +7,14 @@ import {
   SEARCH_SYSTEM,
   VERIFY_SCHEMA,
   VERIFY_SYSTEM,
+  VERIFY_FACTS_SCHEMA,
+  VERIFY_FACTS_SYSTEM,
   buildExtractContents,
   buildGenerateContents,
   buildGenerateSystem,
   buildSearchPrompt,
   buildVerifyContents,
+  buildVerifyFactsContents,
 } from './content.prompts';
 
 // Cheap/fast model classifies + extracts; a stronger one writes the article.
@@ -263,6 +266,44 @@ export class LlmService {
     return {
       ok: issues.length === 0 && !derivative,
       notes: lines.length ? lines.join('\n') : null,
+      usage: { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens, model },
+    };
+  }
+
+  /**
+   * Audit a generated article against our OWN structured FACTS (não há prosa-fonte).
+   * Só fidelidade — invenção/contradição/dedução sem lastro. Reusar os fatos é o
+   * esperado, então NÃO há checagem de derivação. Usado por fontes generativas.
+   */
+  async verifyAgainstFacts(
+    factsJson: string,
+    text: string,
+    model: string = MODEL_EXTRACT,
+  ): Promise<{ ok: boolean; notes: string | null; usage: Usage }> {
+    const client = this.assertClient();
+    const res = await client.messages.create({
+      model,
+      max_tokens: 1024,
+      system: VERIFY_FACTS_SYSTEM,
+      messages: [{ role: 'user', content: buildVerifyFactsContents(factsJson, text) }],
+      tools: [
+        {
+          name: 'record_check',
+          description: 'Registra a auditoria de fidelidade aos fatos.',
+          input_schema: VERIFY_FACTS_SCHEMA as unknown as Anthropic.Tool['input_schema'],
+        },
+      ],
+      tool_choice: { type: 'tool', name: 'record_check' },
+    });
+    const tool = res.content.find((b) => b.type === 'tool_use');
+    const parsed =
+      tool && tool.type === 'tool_use' ? (tool.input as { issues?: unknown }) : {};
+    const issues = Array.isArray(parsed.issues)
+      ? parsed.issues.filter((i): i is string => typeof i === 'string')
+      : [];
+    return {
+      ok: issues.length === 0,
+      notes: issues.length ? issues.join('\n') : null,
       usage: { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens, model },
     };
   }

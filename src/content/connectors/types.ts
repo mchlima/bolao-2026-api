@@ -8,6 +8,10 @@ export interface DiscoveredItem {
   sourceSummary: string | null;
   sourceText: string | null; // full body when the connector already has it (else fetched later)
   publishedAt: Date | null;
+  // Generative sources (ex.: MATCH_REPORT) já entregam os fatos estruturados e o
+  // id da partida — o processamento pula a extração e gera direto destes.
+  facts?: Record<string, unknown> | null;
+  matchId?: string | null;
 }
 
 /** One input-type adapter. The engine downstream is identical for every type. */

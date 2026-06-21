@@ -12,7 +12,16 @@ import {
 } from 'class-validator';
 
 // TOPIC = pauta por busca na web (sem URL fixa; o assunto vai na config).
-export const FEED_TYPES = ['RSS', 'NEWS_API', 'PAGE', 'TOPIC'] as const;
+// MATCH_REPORT = fonte GENERATIVA: não busca na web, lê o nosso banco (partidas
+// encerradas) e monta os fatos direto — pula a extração, vai direto pra geração.
+export const FEED_TYPES = ['RSS', 'NEWS_API', 'PAGE', 'TOPIC', 'MATCH_REPORT'] as const;
+
+// Fontes cujos fatos já vêm prontos do conector (lendo o banco): o processamento
+// pula fetch/extração/dedup-por-IA e gera a partir de NewsItem.facts.
+export const GENERATIVE_FEED_TYPES = ['MATCH_REPORT'] as const;
+export function isGenerativeFeedType(type: string | null | undefined): boolean {
+  return !!type && (GENERATIVE_FEED_TYPES as readonly string[]).includes(type);
+}
 
 export class CreateNewsFeedDto {
   @IsString()
