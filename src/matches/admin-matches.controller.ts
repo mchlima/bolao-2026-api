@@ -59,7 +59,7 @@ export class AdminMatchesController {
     @Body() dto: CreateMatchNoteDto,
     @CurrentUser() admin: SafeUser,
   ): Promise<MatchNote> {
-    return this.matches.addNote(id, dto.text, admin.id);
+    return this.matches.addNote(id, dto.text, dto.minute ?? null, admin.id);
   }
 
   @Delete(':id/notes/:noteId')

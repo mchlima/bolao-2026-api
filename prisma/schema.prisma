@@ -762,6 +762,7 @@ model MatchNote {
   id        String   @id @default(cuid())
   matchId   String
   text      String
+  minute    String? // tempo do jogo (ex.: "67'", "45+2"); auto do relógio ao vivo ou digitado
   authorId  String?
   createdAt DateTime @default(now())
 

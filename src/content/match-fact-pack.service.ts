@@ -226,8 +226,11 @@ export class MatchFactPackService {
     }
 
     // Observações do admin narrando ao vivo — entram como fato (cor/contexto humano).
+    // Prefixa o tempo do jogo quando informado (ex.: "67' — pressão total").
     if (blocks.comentariosDoEditor && match.notes.length) {
-      facts.comentariosDoEditor = match.notes.map((n) => n.text);
+      facts.comentariosDoEditor = match.notes.map((n) =>
+        n.minute ? `${n.minute} — ${n.text}` : n.text,
+      );
     }
 
     return { facts, title };

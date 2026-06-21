@@ -198,10 +198,12 @@ export class MatchesService {
     return this.prisma.matchNote.findMany({ where: { matchId }, orderBy: { createdAt: 'asc' } });
   }
 
-  async addNote(matchId: string, text: string, authorId: string): Promise<MatchNote> {
+  async addNote(matchId: string, text: string, minute: string | null, authorId: string): Promise<MatchNote> {
     const exists = await this.prisma.match.findUnique({ where: { id: matchId }, select: { id: true } });
     if (!exists) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Partida não encontrada.' });
-    return this.prisma.matchNote.create({ data: { matchId, text: text.trim(), authorId } });
+    return this.prisma.matchNote.create({
+      data: { matchId, text: text.trim(), minute: minute?.trim() || null, authorId },
+    });
   }
 
   async removeNote(matchId: string, noteId: string): Promise<void> {
