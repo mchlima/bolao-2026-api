@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { SourceConnector, FeedPreview } from './connectors/types';
@@ -64,6 +64,19 @@ export class ContentIngestService {
     if (!connector) {
       await this.stampError(feed.id, `Tipo de fonte desconhecido: ${feed.type}`);
       return 0;
+    }
+    // Pauta gasta US$ ao buscar (web search). Se o teto do dia já estourou, não
+    // busca e avisa claramente — em vez de retornar "0" silencioso. (No cron este
+    // throw é engolido pelo .catch; no "Buscar agora" vira mensagem pro usuário.)
+    if (feed.type === 'TOPIC') {
+      const cap = await this.settings.capStatus();
+      if (cap.over) {
+        throw new BadRequestException({
+          code: 'CAP_EXCEEDED',
+          message:
+            'Pauta não buscou: teto do dia atingido. Aumente o teto em Configurações ou aguarde o reset (meia-noite UTC).',
+        });
+      }
     }
     try {
       const items = await connector.discover(feed);
