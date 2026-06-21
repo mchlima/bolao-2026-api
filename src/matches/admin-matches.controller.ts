@@ -2,19 +2,21 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   HttpCode,
   Param,
   Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
+import { MatchNote, UserRole } from '@prisma/client';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import type { SafeUser } from '../users/user.types';
 import { CreateMatchDto } from './dto/create-match.dto';
+import { CreateMatchNoteDto } from './dto/match-note.dto';
 import { UpdateMatchDto } from './dto/update-match.dto';
 import { MatchesService, MatchWithRelations } from './matches.service';
 
@@ -42,5 +44,27 @@ export class AdminMatchesController {
   @HttpCode(204)
   remove(@Param('id') id: string): Promise<void> {
     return this.matches.remove(id);
+  }
+
+  // ───────────────────────────── narração ao vivo (comentários do admin → fatos)
+
+  @Get(':id/notes')
+  listNotes(@Param('id') id: string): Promise<MatchNote[]> {
+    return this.matches.listNotes(id);
+  }
+
+  @Post(':id/notes')
+  addNote(
+    @Param('id') id: string,
+    @Body() dto: CreateMatchNoteDto,
+    @CurrentUser() admin: SafeUser,
+  ): Promise<MatchNote> {
+    return this.matches.addNote(id, dto.text, admin.id);
+  }
+
+  @Delete(':id/notes/:noteId')
+  @HttpCode(204)
+  removeNote(@Param('id') id: string, @Param('noteId') noteId: string): Promise<void> {
+    return this.matches.removeNote(id, noteId);
   }
 }

@@ -744,6 +744,7 @@ model Match {
   stats         MatchStat[]
   followers     FollowedMatch[]
   newsItems     NewsItem[]
+  notes         MatchNote[]
 
   @@unique([seasonId, matchNumber]) // idempotent fixture seeding
   @@index([seasonId])
@@ -752,6 +753,22 @@ model Match {
   @@index([roundId])
   @@index([tieId])
   @@map("matches")
+}
+
+// Comentário do admin durante a partida (narração ao vivo). Vira FATO: o
+// MatchFactPackService injeta o texto em facts.comentariosDoEditor, que o modelo
+// usa ao gerar a matéria (MATCH_REPORT). Só texto; authorId é auditoria (sem FK).
+model MatchNote {
+  id        String   @id @default(cuid())
+  matchId   String
+  text      String
+  authorId  String?
+  createdAt DateTime @default(now())
+
+  match Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  @@index([matchId])
+  @@map("match_notes")
 }
 
 model Prediction {

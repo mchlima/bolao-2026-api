@@ -13,6 +13,7 @@ export interface PackBlocks {
   lancesNotaveis: boolean;
   classificacao: boolean;
   proximaRodada: boolean;
+  comentariosDoEditor: boolean;
 }
 
 export const DEFAULT_BLOCKS: PackBlocks = {
@@ -25,6 +26,7 @@ export const DEFAULT_BLOCKS: PackBlocks = {
   lancesNotaveis: true,
   classificacao: true,
   proximaRodada: true,
+  comentariosDoEditor: true,
 };
 
 const DEFAULT_NOTABLE_CAP = 4;
@@ -86,6 +88,7 @@ export class MatchFactPackService {
         events: { include: { player: true, related: true, team: true } },
         stats: { include: { team: true } },
         lineupEntries: { include: { player: true } },
+        notes: { orderBy: { createdAt: 'asc' } },
       },
     });
     if (!match || match.status !== 'FINISHED' || !match.homeTeam || !match.awayTeam) return null;
@@ -220,6 +223,11 @@ export class MatchFactPackService {
     if (blocks.proximaRodada && match.groupId) {
       const prox = await this.nextRound(match.groupId, match.id);
       if (prox.length) facts.proximaRodada = prox;
+    }
+
+    // Observações do admin narrando ao vivo — entram como fato (cor/contexto humano).
+    if (blocks.comentariosDoEditor && match.notes.length) {
+      facts.comentariosDoEditor = match.notes.map((n) => n.text);
     }
 
     return { facts, title };

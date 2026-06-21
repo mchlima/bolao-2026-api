@@ -18,6 +18,8 @@ import { AdminNewsTonesController } from './admin-news-tones.controller';
 import { AdminNewsItemsController } from './admin-news-items.controller';
 import { AdminPostsController } from './admin-posts.controller';
 import { PostsService } from './posts.service';
+import { AdminMatchReportController } from './admin-match-report.controller';
+import { MatchReportService } from './match-report.service';
 import { AdminContentSettingsController } from './admin-content-settings.controller';
 import { AdminContentDashboardController } from './admin-content-dashboard.controller';
 import { PublicNewsController, PublicTaxonomyController } from './public-news.controller';
@@ -37,6 +39,7 @@ import { ContentSettingsService } from './content-settings.service';
     AdminNewsTonesController,
     AdminNewsItemsController,
     AdminPostsController,
+    AdminMatchReportController,
     AdminContentSettingsController,
     AdminContentDashboardController,
     AdminTagsController,
@@ -63,6 +66,7 @@ import { ContentSettingsService } from './content-settings.service';
     NewsTonesService,
     NewsItemsService,
     PostsService,
+    MatchReportService,
   ],
   exports: [LlmService, ContentIngestService, ContentProcessService],
 })
