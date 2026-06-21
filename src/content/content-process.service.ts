@@ -60,16 +60,27 @@ export class ContentProcessService {
     if (!this.llm.configured) return;
     const cfg = await this.settings.getConfig();
     if (cfg.paused) return; // master switch
-    const used = await this.settings.getTodayUsage();
-    if (cfg.dailyBudgetUsd > 0 && used.costUsd >= cfg.dailyBudgetUsd) return; // teto de gasto/dia
-    if (cfg.maxPerDay > 0 && used.items >= cfg.maxPerDay) return; // teto de volume/dia
+    if (await this.capReached(cfg)) return; // já bateu algum teto hoje
     const pending = await this.prisma.newsItem.findMany({
       where: { status: 'DISCOVERED' },
       orderBy: { createdAt: 'asc' },
       select: { id: true },
       take: BATCH,
     });
-    for (const { id } of pending) await this.processItem(id, cfg);
+    for (const { id } of pending) {
+      // Re-checa ANTES de cada item: senão o lote inteiro (BATCH) passaria de uma vez
+      // e estouraria o teto (ex.: maxPerDay=1 gerava até BATCH matérias num tick só).
+      if (await this.capReached(cfg)) break;
+      await this.processItem(id, cfg);
+    }
+  }
+
+  /** Algum teto diário batido (gasto OU volume)? Lê o uso fresco a cada chamada. */
+  private async capReached(cfg: ContentConfig): Promise<boolean> {
+    const u = await this.settings.getTodayUsage();
+    if (cfg.dailyBudgetUsd > 0 && u.costUsd >= cfg.dailyBudgetUsd) return true;
+    if (cfg.maxPerDay > 0 && u.items >= cfg.maxPerDay) return true;
+    return false;
   }
 
   async processItem(id: string, cfg?: ContentConfig): Promise<void> {
