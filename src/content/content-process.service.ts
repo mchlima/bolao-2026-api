@@ -7,7 +7,7 @@ import {
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { NewsTone, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { LlmService, articleAuditText, costUsd } from './llm.service';
+import { LlmService, articleAuditText, costUsd, normalizeEventKey } from './llm.service';
 import { ArticleFetchService } from './article-fetch.service';
 import { ContentSettingsService, ContentConfig } from './content-settings.service';
 import { isGenerativeFeedType } from './dto/news-feed.dto';
@@ -20,6 +20,21 @@ const DEFAULT_MAX_AGE_HOURS = 48;
 const DEDUP_WINDOW_MS = 48 * 3_600_000;
 // Abaixo disto, o corpo é menu/teaser — sem matéria pra apurar (evita gerar do título).
 const MIN_BODY_CHARS = 400;
+
+/**
+ * Slug canônico de RESUMO DE JOGO, no padrão dos portais (ge.globo/ESPN): o placar é
+ * keyword forte de busca de jogo encerrado ("mexico-1-x-0-coreia-do-sul"). O slug do
+ * modelo sai genérico (sem placar) → para MATCH_REPORT cravamos um determinístico.
+ * sourceTitle já vem como "Time A N x M Time B" (MatchFactPackService); normalizeEventKey
+ * PRESERVA os números (só tira acento e troca o resto por hífen).
+ */
+function matchReportSlug(sourceTitle: string | null, facts: Record<string, unknown> | null): string | null {
+  const title = (sourceTitle ?? '').trim();
+  if (!title) return null;
+  const comp = (facts?.partida as { competicao?: unknown } | undefined)?.competicao;
+  const base = typeof comp === 'string' && comp.trim() ? `${title} ${comp.trim()}` : title;
+  return normalizeEventKey(base) || null;
+}
 
 /** Normalized set of entities (teams/people/competition) from the extracted facts. */
 function factEntities(facts: unknown): Set<string> {
@@ -280,9 +295,10 @@ export class ContentProcessService {
   private async generateFromFacts(
     item: {
       id: string;
+      sourceTitle: string | null;
       facts: Prisma.JsonValue | null;
       toneId: string | null;
-      feed: { defaultToneId: string | null; focus: string | null } | null;
+      feed: { type: string; defaultToneId: string | null; focus: string | null } | null;
     },
     conf: ContentConfig,
   ): Promise<void> {
@@ -296,6 +312,11 @@ export class ContentProcessService {
     // Foco da fonte = direcionamento editorial fixo (ângulo aplicado a toda matéria).
     const steer = item.feed?.focus?.trim() || null;
     const gen = await this.llm.generateArticle(facts, tone.promptText, steer, conf.generateModel);
+    // Resumo de jogo: slug canônico no padrão dos portais (times + placar), determinístico.
+    if (item.feed?.type === 'MATCH_REPORT') {
+      const mrSlug = matchReportSlug(item.sourceTitle, facts);
+      if (mrSlug) gen.seo.slug = mrSlug;
+    }
     const verify = await this.llm.verifyAgainstFacts(
       JSON.stringify(facts, null, 2),
       articleAuditText(gen),
@@ -369,6 +390,11 @@ export class ContentProcessService {
         steer,
         cfg.generateModel,
       );
+      // Resumo de jogo: re-crava o slug canônico (times + placar) a cada regeração.
+      if (item.feed?.type === 'MATCH_REPORT') {
+        const mrSlug = matchReportSlug(item.sourceTitle, item.facts as Record<string, unknown> | null);
+        if (mrSlug) gen.seo.slug = mrSlug;
+      }
       // Item generativo (resumo de jogo): audita contra os PRÓPRIOS fatos (sem prosa-
       // fonte). Senão, contra a fonte original como as notícias de feed.
       const verify = isGenerativeFeedType(item.feed?.type)
