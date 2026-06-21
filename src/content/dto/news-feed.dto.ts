@@ -6,13 +6,13 @@ import {
   IsObject,
   IsOptional,
   IsString,
-  IsUrl,
   Max,
   MaxLength,
   Min,
 } from 'class-validator';
 
-export const FEED_TYPES = ['RSS', 'NEWS_API', 'PAGE'] as const;
+// TOPIC = pauta por busca na web (sem URL fixa; o assunto vai na config).
+export const FEED_TYPES = ['RSS', 'NEWS_API', 'PAGE', 'TOPIC'] as const;
 
 export class CreateNewsFeedDto {
   @IsString()
@@ -20,7 +20,9 @@ export class CreateNewsFeedDto {
   @MaxLength(120)
   name!: string;
 
-  @IsUrl()
+  // URL do feed/página/API, ou um id sintético "pauta:<slug>" no caso de TOPIC.
+  @IsString()
+  @IsNotEmpty()
   @MaxLength(500)
   url!: string;
 
@@ -65,7 +67,7 @@ export class UpdateNewsFeedDto {
   name?: string;
 
   @IsOptional()
-  @IsUrl()
+  @IsString()
   @MaxLength(500)
   url?: string;
 
@@ -103,7 +105,8 @@ export class UpdateNewsFeedDto {
 }
 
 export class PreviewFeedDto {
-  @IsUrl()
+  @IsString()
+  @IsNotEmpty()
   @MaxLength(500)
   url!: string;
 }

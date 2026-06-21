@@ -5,6 +5,7 @@ import { SourceConnector, FeedPreview } from './connectors/types';
 import { RssConnector } from './connectors/rss.connector';
 import { NewsApiConnector } from './connectors/news-api.connector';
 import { PageConnector } from './connectors/page.connector';
+import { TopicConnector } from './connectors/topic.connector';
 import { ContentSettingsService } from './content-settings.service';
 
 export type { FeedPreview } from './connectors/types';
@@ -31,9 +32,15 @@ export class ContentIngestService {
     rss: RssConnector,
     newsApi: NewsApiConnector,
     page: PageConnector,
+    topic: TopicConnector,
   ) {
     this.rss = rss;
-    this.connectors = { [rss.type]: rss, [newsApi.type]: newsApi, [page.type]: page };
+    this.connectors = {
+      [rss.type]: rss,
+      [newsApi.type]: newsApi,
+      [page.type]: page,
+      [topic.type]: topic,
+    };
   }
 
   @Cron(CronExpression.EVERY_5_MINUTES)

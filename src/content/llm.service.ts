@@ -4,9 +4,11 @@ import Anthropic from '@anthropic-ai/sdk';
 import {
   EXTRACT_SCHEMA,
   EXTRACT_SYSTEM,
+  SEARCH_SYSTEM,
   buildExtractContents,
   buildGenerateContents,
   buildGenerateSystem,
+  buildSearchPrompt,
 } from './content.prompts';
 
 // Cheap/fast model classifies + extracts; a stronger one writes the article.
@@ -20,6 +22,11 @@ export interface Usage {
   model: string;
 }
 
+// Cheap model also drives topic discovery (web search results are token-heavy).
+const MODEL_SEARCH = 'claude-haiku-4-5';
+// Anthropic web search: US$ per search request (billed on top of tokens).
+const WEB_SEARCH_PRICE = 0.01;
+
 // USD per 1M tokens (input/output) — keep in sync with the model strings above.
 const PRICES: Record<string, { in: number; out: number }> = {
   'claude-haiku-4-5': { in: 1, out: 5 },
@@ -31,6 +38,17 @@ const PRICES: Record<string, { in: number; out: number }> = {
 export function costUsd(u: Usage): number {
   const p = PRICES[u.model] ?? { in: 3, out: 15 };
   return (u.inputTokens / 1_000_000) * p.in + (u.outputTokens / 1_000_000) * p.out;
+}
+
+/** Cost of a topic-discovery call: tokens + the web-search fee. */
+export function searchCostUsd(u: Usage, searchRequests: number): number {
+  return costUsd(u) + Math.max(0, searchRequests) * WEB_SEARCH_PRICE;
+}
+
+export interface TopicHit {
+  title: string;
+  url: string;
+  pageAge: string | null; // "April 30, 2025" from web_search_result
 }
 
 export interface ExtractResult {
@@ -118,6 +136,59 @@ export class LlmService {
       eventKey: normalizeEventKey(parsed.eventKey),
       facts: parsed.facts ?? {},
       usage: { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens, model: MODEL_EXTRACT },
+    };
+  }
+
+  /**
+   * Topic discovery via Anthropic web search. Returns the REAL articles found
+   * (url/title/date) — we don't use Claude's prose, only the search results, so
+   * the rest of the pipeline (fetch body → extract facts → generate) stays the
+   * single source of truth. Cost = tokens + web-search fee (see searchCostUsd).
+   */
+  async searchTopic(
+    query: string,
+    opts: { allowedDomains?: string[]; maxSearches?: number } = {},
+  ): Promise<{ results: TopicHit[]; usage: Usage; searchRequests: number }> {
+    const client = this.assertClient();
+    const tool: Record<string, unknown> = {
+      type: 'web_search_20250305',
+      name: 'web_search',
+      max_uses: Math.min(Math.max(opts.maxSearches ?? 3, 1), 10),
+    };
+    if (opts.allowedDomains?.length) tool.allowed_domains = opts.allowedDomains;
+
+    const res = await client.messages.create({
+      model: MODEL_SEARCH,
+      max_tokens: 1024,
+      system: SEARCH_SYSTEM,
+      messages: [{ role: 'user', content: buildSearchPrompt(query) }],
+      tools: [tool] as unknown as Anthropic.MessageCreateParams['tools'],
+    });
+
+    const results: TopicHit[] = [];
+    const seen = new Set<string>();
+    for (const block of res.content as unknown as Array<Record<string, unknown>>) {
+      if (block.type !== 'web_search_tool_result') continue;
+      const inner = block.content;
+      if (!Array.isArray(inner)) continue; // error object → skip
+      for (const r of inner as Array<Record<string, unknown>>) {
+        if (r.type !== 'web_search_result') continue;
+        const url = typeof r.url === 'string' ? r.url : '';
+        if (!url || seen.has(url)) continue;
+        seen.add(url);
+        results.push({
+          url,
+          title: typeof r.title === 'string' ? r.title.trim() : '',
+          pageAge: typeof r.page_age === 'string' ? r.page_age : null,
+        });
+      }
+    }
+    const serverUse = (res.usage as { server_tool_use?: { web_search_requests?: number } })
+      .server_tool_use;
+    return {
+      results,
+      usage: { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens, model: MODEL_SEARCH },
+      searchRequests: serverUse?.web_search_requests ?? 0,
     };
   }
 

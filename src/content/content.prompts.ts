@@ -113,6 +113,30 @@ export const EXTRACT_SCHEMA = {
   required: ['isSportsNews', 'relevanceScore', 'reason', 'eventKey', 'facts'],
 } as const;
 
+// ───────────────────────────────────────── Topic discovery (web search)
+
+// The search call is ONLY for discovery: it runs web searches and we harvest the
+// real article URLs/titles/dates from the results. We deliberately ignore Claude's
+// prose so the downstream pipeline (fetch → extract → generate) stays the source
+// of truth — no facts ever come from the model's head.
+export const SEARCH_SYSTEM = [
+  'Você é um assistente de PAUTA esportiva. Sua única tarefa é USAR A BUSCA para',
+  'encontrar NOTÍCIAS RECENTES (idealmente últimas 48h) sobre o assunto pedido.',
+  '- Faça buscas objetivas sobre fatos novos: resultados, lesões, contratações,',
+  '  declarações, convocações, escalações.',
+  '- NÃO escreva matéria, NÃO resuma, NÃO invente nada — apenas busque. Os artigos',
+  '  encontrados serão processados depois. Pode responder de forma bem curta.',
+].join('\n');
+
+export function buildSearchPrompt(query: string): string {
+  return [
+    'Assunto da pauta — busque notícias recentes de veículos jornalísticos sobre:',
+    query.trim(),
+    '',
+    'Priorize artigos das últimas 48 horas.',
+  ].join('\n');
+}
+
 // ─────────────────────────────────────────────────────── Step 2: generate
 
 // The tom's style guide (NewsTone.promptText) is sandwiched between hard rules so
