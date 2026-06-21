@@ -39,7 +39,13 @@ export class ContentSettingsService {
   }
 
   async setConfig(patch: Partial<ContentConfig>): Promise<ContentConfig> {
-    const next = { ...(await this.getConfig()), ...patch };
+    // Drop undefined keys: DTOs trazem todos os campos (class-fields), os não
+    // enviados vêm undefined e, no spread, apagariam os valores salvos (vira null
+    // no JSON) — fazendo a config voltar pros DEFAULTS. Só mescla o que veio mesmo.
+    const clean = Object.fromEntries(
+      Object.entries(patch).filter(([, v]) => v !== undefined),
+    ) as Partial<ContentConfig>;
+    const next = { ...(await this.getConfig()), ...clean };
     await this.prisma.appSetting.upsert({
       where: { key: CONFIG_KEY },
       update: { value: next as object },
