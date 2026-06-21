@@ -26,6 +26,10 @@ export class CreateNewsToneDto {
   @IsNotEmpty()
   @MaxLength(4000)
   promptText!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 }
 
 export class UpdateNewsToneDto {

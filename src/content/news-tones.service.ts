@@ -47,6 +47,7 @@ export class NewsTonesService {
         slug,
         description: dto.description?.trim() || null,
         promptText: dto.promptText.trim(),
+        isActive: dto.isActive ?? true,
       },
     });
   }
