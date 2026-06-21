@@ -43,9 +43,9 @@ export class TopicConnector implements SourceConnector {
     // Custo da descoberta (tokens + buscas) entra no teto de gasto do dia.
     await this.settings.addUsage(searchCostUsd(usage, searchRequests), false);
 
-    // Descarta o que claramente NÃO é notícia (tabela/estatística/wiki/agregador)
-    // antes de gastar extração — a relevância ainda é a rede de segurança final.
-    const articles = results.filter((r) => !looksLikeNonNews(r.url));
+    // Só passa o que parece MATÉRIA (índice/tabela/hub/agregador caem fora) —
+    // economiza extração; a relevância ainda é a rede de segurança final.
+    const articles = results.filter((r) => looksLikeArticle(r.url));
 
     const limit = Math.min(Math.max(cfg.maxResults ?? 15, 1), 30);
     return articles.slice(0, limit).map(
@@ -71,22 +71,38 @@ const NON_NEWS_DOMAINS = [
   'wikipedia.org', 'sofascore.com', 'flashscore', '365scores', 'fbref.com',
   'whoscored.com', 'fotmob.com', 'besoccer.com', 'footystats', 'oddspedia',
 ];
-// Trechos de caminho típicos de página-índice (tabela, elenco, agenda...).
-const NON_NEWS_PATHS = [
-  '/tabela', '/classificacao', '/classificação', '/estatisticas', '/estatísticas',
-  '/stats', '/standings', '/table', '/elenco', '/calendario', '/calendário', '/agenda',
+// Pedaços no caminho que denunciam página-índice (tabela/resultados/fixtures/agenda…).
+// Comparados como SUBSTRING do path — pegam "/tabela/" e "-tabela-classificacao-" no slug.
+const NON_NEWS_HINTS = [
+  'tabela', 'classificacao', 'classificação', 'estatistica', 'estatística',
+  'standings', 'scores-fixtures', 'fixtures', '/resultados', '/scores', '/table',
+  '/stats', 'calendario', 'calendário', '/agenda', '/elenco',
 ];
+// Caminhos que marcam matéria de verdade.
+const ARTICLE_HINTS = /\/(noticia|noticias|materia|matéria|artigo|article|news|post|reportagem|coluna)\b/;
+const DATED_PATH = /\/(19|20)\d{2}\//; // .../2026/06/...
 
-/** Heurística: a URL aparenta NÃO ser uma matéria jornalística? */
-function looksLikeNonNews(url: string): boolean {
+/**
+ * Heurística "parece matéria jornalística?": bloqueia domínio/índice e exige um
+ * sinal POSITIVO de artigo (caminho de notícia, caminho datado, ou slug longo).
+ * Páginas-hub (lance.com.br/copa-do-mundo) e índices (.../resultados, /scores-fixtures)
+ * caem fora. A relevância na extração continua como rede de segurança final.
+ */
+function looksLikeArticle(url: string): boolean {
   const u = url.toLowerCase();
-  if (NON_NEWS_DOMAINS.some((d) => u.includes(d))) return true;
+  if (NON_NEWS_DOMAINS.some((d) => u.includes(d))) return false;
+  let path: string;
   try {
-    const path = new URL(url).pathname.toLowerCase();
-    return NON_NEWS_PATHS.some((p) => path.includes(p));
+    path = new URL(url).pathname.toLowerCase();
   } catch {
     return false;
   }
+  if (NON_NEWS_HINTS.some((h) => path.includes(h))) return false;
+  const segs = path.split('/').filter(Boolean);
+  if (segs.length < 2) return false; // home / seção
+  if (ARTICLE_HINTS.test(path) || DATED_PATH.test(path)) return true;
+  const last = segs[segs.length - 1];
+  return last.length >= 25 && last.includes('-'); // slug longo de matéria
 }
 
 const REL_MS: Record<string, number> = {
