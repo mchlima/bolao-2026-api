@@ -7,7 +7,7 @@ import {
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { NewsTone, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { LlmService, articleAuditText, costUsd, normalizeEventKey } from './llm.service';
+import { LlmService, articleAuditText, costUsd } from './llm.service';
 import { ArticleFetchService } from './article-fetch.service';
 import { ContentSettingsService, ContentConfig } from './content-settings.service';
 import { isGenerativeFeedType } from './dto/news-feed.dto';
@@ -22,18 +22,29 @@ const DEDUP_WINDOW_MS = 48 * 3_600_000;
 const MIN_BODY_CHARS = 400;
 
 /**
+ * Normaliza para slug: sem acento, minúsculo, só [a-z0-9-]. PRESERVA os números
+ * (placar) e NÃO limita o tamanho (decisão do usuário — slug sem limite).
+ */
+function slugify(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/**
  * Slug canônico de RESUMO DE JOGO, no padrão dos portais (ge.globo/ESPN): o placar é
- * keyword forte de busca de jogo encerrado ("mexico-1-x-0-coreia-do-sul"). O slug do
- * modelo sai genérico (sem placar) → para MATCH_REPORT cravamos um determinístico.
- * sourceTitle já vem como "Time A N x M Time B" (MatchFactPackService); normalizeEventKey
- * PRESERVA os números (só tira acento e troca o resto por hífen).
+ * keyword forte de busca de jogo encerrado ("mexico-1-x-0-coreia-do-sul"). sourceTitle
+ * já vem como "Time A N x M Time B" (MatchFactPackService).
  */
 function matchReportSlug(sourceTitle: string | null, facts: Record<string, unknown> | null): string | null {
   const title = (sourceTitle ?? '').trim();
   if (!title) return null;
   const comp = (facts?.partida as { competicao?: unknown } | undefined)?.competicao;
   const base = typeof comp === 'string' && comp.trim() ? `${title} ${comp.trim()}` : title;
-  return normalizeEventKey(base) || null;
+  return slugify(base) || null;
 }
 
 /** Normalized set of entities (teams/people/competition) from the extracted facts. */
@@ -459,7 +470,7 @@ export class ContentProcessService {
       const s = matchReportSlug(sourceTitle, facts);
       if (s) return s;
     }
-    return normalizeEventKey(genTitle) || 'materia';
+    return slugify(genTitle) || 'materia';
   }
 
   /** Item override → feed default → oldest active tone. */
