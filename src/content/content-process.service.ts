@@ -17,6 +17,8 @@ const BATCH = 4;
 const DEFAULT_MAX_AGE_HOURS = 48;
 // Cross-source dedup lookback (by ingest time, not article age) — fixed.
 const DEDUP_WINDOW_MS = 48 * 3_600_000;
+// Abaixo disto, o corpo é menu/teaser — sem matéria pra apurar (evita gerar do título).
+const MIN_BODY_CHARS = 400;
 
 /** Normalized set of entities (teams/people/competition) from the extracted facts. */
 function factEntities(facts: unknown): Set<string> {
@@ -126,6 +128,22 @@ export class ContentProcessService {
       }
       if (publishedAt && !item.publishedAt) {
         await this.prisma.newsItem.update({ where: { id }, data: { publishedAt } });
+      }
+
+      // Corpo magro = não recuperamos a matéria (ex.: página de placar/app JS que só
+      // devolve o menu). Apurar a partir do TÍTULO leva o gerador a inventar — então
+      // filtramos ANTES de gastar extração/geração. Resgatável se o editor discordar.
+      const effectiveBody = (body ?? item.sourceSummary ?? '').trim();
+      if (effectiveBody.length < MIN_BODY_CHARS) {
+        await this.prisma.newsItem.update({
+          where: { id },
+          data: {
+            status: 'FILTERED',
+            relevanceReason:
+              'Corpo da matéria não recuperado (página sem conteúdo de notícia — ex.: placar/app). Sem texto não dá para apurar fatos.',
+          },
+        });
+        return;
       }
 
       const extracted = await this.llm.extractAndClassify(
