@@ -280,7 +280,7 @@ export class ContentProcessService {
       id: string;
       facts: Prisma.JsonValue | null;
       toneId: string | null;
-      feed: { defaultToneId: string | null } | null;
+      feed: { defaultToneId: string | null; focus: string | null } | null;
     },
     conf: ContentConfig,
   ): Promise<void> {
@@ -291,7 +291,9 @@ export class ContentProcessService {
     const tone = await this.resolveTone(item.toneId, item.feed?.defaultToneId ?? null);
     if (!tone) throw new Error('Nenhum tom ativo configurado para gerar o texto.');
 
-    const gen = await this.llm.generateArticle(facts, tone.promptText, null, conf.generateModel);
+    // Foco da fonte = direcionamento editorial fixo (ângulo aplicado a toda matéria).
+    const steer = item.feed?.focus?.trim() || null;
+    const gen = await this.llm.generateArticle(facts, tone.promptText, steer, conf.generateModel);
     const verify = await this.llm.verifyAgainstFacts(
       JSON.stringify(facts, null, 2),
       gen.text,
@@ -352,10 +354,16 @@ export class ContentProcessService {
       if (!tone) throw new Error('Nenhum tom ativo configurado.');
 
       const cfg = await this.settings.getConfig();
+      // Item generativo: mantém o direcionamento fixo da fonte (foco) + a orientação
+      // pontual do editor. Notícia comum: só a orientação do editor (o foco dela age
+      // na extração, não aqui).
+      const steer = isGenerativeFeedType(item.feed?.type)
+        ? [item.feed?.focus, guidance].map((s) => s?.trim()).filter(Boolean).join('\n') || null
+        : guidance;
       const gen = await this.llm.generateArticle(
         item.facts as Record<string, unknown>,
         tone.promptText,
-        guidance,
+        steer,
         cfg.generateModel,
       );
       // Item generativo (resumo de jogo): audita contra os PRÓPRIOS fatos (sem prosa-
