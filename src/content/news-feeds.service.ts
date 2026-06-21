@@ -51,6 +51,7 @@ export class NewsFeedsService {
           ...(dto.focus !== undefined && { focus: dto.focus?.trim() || null }),
           ...(dto.defaultToneId && { defaultToneId: dto.defaultToneId }),
           ...(dto.fetchIntervalMin !== undefined && { fetchIntervalMin: dto.fetchIntervalMin }),
+          ...(dto.maxAgeHours !== undefined && { maxAgeHours: dto.maxAgeHours }),
           ...(dto.isActive !== undefined && { isActive: dto.isActive }),
         },
       });
@@ -72,6 +73,7 @@ export class NewsFeedsService {
       ...(dto.sport !== undefined && { sport: dto.sport.trim() }),
       ...(dto.focus !== undefined && { focus: dto.focus?.trim() || null }),
       ...(dto.fetchIntervalMin !== undefined && { fetchIntervalMin: dto.fetchIntervalMin }),
+      ...(dto.maxAgeHours !== undefined && { maxAgeHours: dto.maxAgeHours }),
       ...(dto.isActive !== undefined && { isActive: dto.isActive }),
     };
     if (dto.defaultToneId !== undefined) {

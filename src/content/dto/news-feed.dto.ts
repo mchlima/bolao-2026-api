@@ -55,6 +55,12 @@ export class CreateNewsFeedDto {
   fetchIntervalMin?: number;
 
   @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(8760)
+  maxAgeHours?: number;
+
+  @IsOptional()
   @IsBoolean()
   isActive?: boolean;
 }
@@ -98,6 +104,12 @@ export class UpdateNewsFeedDto {
   @Min(1)
   @Max(1440)
   fetchIntervalMin?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(8760)
+  maxAgeHours?: number | null;
 
   @IsOptional()
   @IsBoolean()

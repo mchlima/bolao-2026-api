@@ -13,8 +13,10 @@ import { ContentSettingsService, ContentConfig } from './content-settings.servic
 
 // Small per-tick batch keeps load gentle and respects provider rate limits.
 const BATCH = 4;
-// Freshness guard: never rewrite news older than this (the user's hard rule).
-const MAX_AGE_MS = 48 * 3_600_000;
+// Default freshness window in hours — overridable per feed via NewsFeed.maxAgeHours.
+const DEFAULT_MAX_AGE_HOURS = 48;
+// Cross-source dedup lookback (by ingest time, not article age) — fixed.
+const DEDUP_WINDOW_MS = 48 * 3_600_000;
 
 /** Normalized set of entities (teams/people/competition) from the extracted facts. */
 function factEntities(facts: unknown): Set<string> {
@@ -112,9 +114,10 @@ export class ContentProcessService {
         fetchedDate = article?.publishedAt ?? null;
       }
 
-      // Freshness guard — never rewrite old news (the user's hard rule).
+      // Freshness guard — never rewrite old news (janela da fonte, ou 48h padrão).
+      const maxAgeMs = (item.feed?.maxAgeHours ?? DEFAULT_MAX_AGE_HOURS) * 3_600_000;
       const publishedAt = item.publishedAt ?? fetchedDate;
-      if (publishedAt && Date.now() - publishedAt.getTime() > MAX_AGE_MS) {
+      if (publishedAt && Date.now() - publishedAt.getTime() > maxAgeMs) {
         await this.prisma.newsItem.update({
           where: { id },
           data: { status: 'FILTERED', relevanceReason: 'Notícia antiga (mais de 48h).', publishedAt },
@@ -156,7 +159,7 @@ export class ContentProcessService {
             eventKey: extracted.eventKey,
             id: { not: id },
             status: { in: ['PENDING_REVIEW', 'APPROVED'] },
-            createdAt: { gte: new Date(Date.now() - MAX_AGE_MS) },
+            createdAt: { gte: new Date(Date.now() - DEDUP_WINDOW_MS) },
           },
           orderBy: { createdAt: 'asc' },
           select: { id: true, sourceTitle: true, facts: true },

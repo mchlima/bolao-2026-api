@@ -909,6 +909,7 @@ model NewsFeed {
   isActive         Boolean   @default(true)
   defaultToneId    String? // tom applied to this feed's items (overridable per item)
   fetchIntervalMin Int       @default(15)
+  maxAgeHours      Int? // janela de frescor desta fonte (h); null = padrão global (48h)
   lastFetchedAt    DateTime?
   lastStatus       String? // OK | ERROR
   lastError        String?

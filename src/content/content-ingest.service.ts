@@ -18,9 +18,10 @@ export interface FetchResult {
 }
 const ZERO: FetchResult = { inserted: 0, found: 0, stale: 0 };
 
-// Ignore items older than this at ingest (only when the source carries a date;
-// undated items are date-checked later, after the article fetch resolves a date).
-const MAX_AGE_HOURS = 48;
+// Default freshness window at ingest (only when the source carries a date; undated
+// items are date-checked later, after the article fetch resolves a date). A feed can
+// override it via NewsFeed.maxAgeHours (ex.: pauta com janela maior).
+const DEFAULT_MAX_AGE_HOURS = 48;
 
 /**
  * Polls active sources and drops fresh items onto the pipeline as DISCOVERED.
@@ -88,7 +89,7 @@ export class ContentIngestService {
     }
     try {
       const items = await connector.discover(feed);
-      const cutoff = Date.now() - MAX_AGE_HOURS * 3_600_000;
+      const cutoff = Date.now() - (feed.maxAgeHours ?? DEFAULT_MAX_AGE_HOURS) * 3_600_000;
       const valid = items.filter((it) => it.sourceTitle && (it.sourceUrl || it.sourceGuid));
       // drop items already known to be stale; keep undated ones (dated at processing)
       const fresh = valid.filter((it) => !it.publishedAt || it.publishedAt.getTime() >= cutoff);
