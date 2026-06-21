@@ -196,7 +196,11 @@ export class PublicNewsService {
         _count: { select: { items: { where: { status: 'APPROVED', slug: { not: null } } } } },
       },
     });
-    if (!c) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Categoria não encontrada.' });
+    // 404 também quando a categoria existe mas não tem matéria publicada: evita servir
+    // página vazia (thin content / soft-404) e mantém consistência com o sitemap.
+    if (!c || c._count.items === 0) {
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Categoria não encontrada.' });
+    }
     return { name: c.name, slug: c.slug, description: c.description, total: c._count.items };
   }
 
@@ -208,7 +212,9 @@ export class PublicNewsService {
         _count: { select: { items: { where: { status: 'APPROVED', slug: { not: null } } } } },
       },
     });
-    if (!t) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Tag não encontrada.' });
+    if (!t || t._count.items === 0) {
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Tag não encontrada.' });
+    }
     return { name: t.name, slug: t.slug, description: t.description, total: t._count.items };
   }
 }
