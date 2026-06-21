@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -17,7 +18,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Paginated } from '../common/pagination';
 import type { SafeUser } from '../users/user.types';
 import { NewsItemsService } from './news-items.service';
-import { ListItemsQueryDto, ReprocessItemDto } from './dto/news-item.dto';
+import { ListItemsQueryDto, ReprocessItemDto, UpdateItemSeoDto } from './dto/news-item.dto';
 
 @Controller('admin/content/items')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -48,6 +49,12 @@ export class AdminNewsItemsController {
   @Post(':id/reject')
   reject(@Param('id') id: string, @CurrentUser() admin: SafeUser): Promise<NewsItem> {
     return this.items.reject(id, admin.id);
+  }
+
+  /** Editor polish of the generated SEO/GEO package (slug, meta, tags, FAQ…). */
+  @Patch(':id/seo')
+  updateSeo(@Param('id') id: string, @Body() dto: UpdateItemSeoDto): Promise<NewsItem> {
+    return this.items.updateSeo(id, dto);
   }
 
   /** Re-generate with an editor steer (appends a revision). */

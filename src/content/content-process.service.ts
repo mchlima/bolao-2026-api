@@ -7,7 +7,7 @@ import {
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { NewsTone, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { LlmService, costUsd } from './llm.service';
+import { LlmService, articleAuditText, costUsd } from './llm.service';
 import { ArticleFetchService } from './article-fetch.service';
 import { ContentSettingsService, ContentConfig } from './content-settings.service';
 import { isGenerativeFeedType } from './dto/news-feed.dto';
@@ -227,7 +227,8 @@ export class ContentProcessService {
       const gen = await this.llm.generateArticle(extracted.facts, tone.promptText, null, conf.generateModel);
       // Auditoria contra a FONTE (fidelidade + derivação): vai pra revisão de qualquer
       // jeito, mas com o alerta. A fonte é a verdade — pega até erro vindo da extração.
-      const verify = await this.llm.verifyArticle(effectiveBody, gen.text, conf.extractModel);
+      // Audita o pacote inteiro (corpo + dek/takeaways/FAQ), não só o corpo.
+      const verify = await this.llm.verifyArticle(effectiveBody, articleAuditText(gen), conf.extractModel);
       await this.prisma.$transaction([
         this.prisma.newsItem.update({
           where: { id },
@@ -241,6 +242,7 @@ export class ContentProcessService {
             toneSnapshot: tone.promptText,
             toneVersion: tone.version,
             generatedText: gen.text,
+            seo: gen.seo as unknown as Prisma.InputJsonValue,
             model: gen.model,
             verifyOk: verify.ok,
             verifyNotes: verify.notes,
@@ -296,7 +298,7 @@ export class ContentProcessService {
     const gen = await this.llm.generateArticle(facts, tone.promptText, steer, conf.generateModel);
     const verify = await this.llm.verifyAgainstFacts(
       JSON.stringify(facts, null, 2),
-      gen.text,
+      articleAuditText(gen),
       conf.extractModel,
     );
     await this.prisma.$transaction([
@@ -308,6 +310,7 @@ export class ContentProcessService {
           toneSnapshot: tone.promptText,
           toneVersion: tone.version,
           generatedText: gen.text,
+          seo: gen.seo as unknown as Prisma.InputJsonValue,
           model: gen.model,
           verifyOk: verify.ok,
           verifyNotes: verify.notes,
@@ -371,10 +374,10 @@ export class ContentProcessService {
       const verify = isGenerativeFeedType(item.feed?.type)
         ? await this.llm.verifyAgainstFacts(
             JSON.stringify(item.facts, null, 2),
-            gen.text,
+            articleAuditText(gen),
             cfg.extractModel,
           )
-        : await this.llm.verifyArticle(item.sourceText ?? '', gen.text, cfg.extractModel);
+        : await this.llm.verifyArticle(item.sourceText ?? '', articleAuditText(gen), cfg.extractModel);
       // Regeração de matéria já existente: soma custo (geração + verificação), sem contar nova matéria.
       await this.settings.addUsage(costUsd(gen.usage) + costUsd(verify.usage), false);
       const last = await this.prisma.newsRevision.aggregate({
@@ -392,6 +395,7 @@ export class ContentProcessService {
             toneSnapshot: tone.promptText,
             toneVersion: tone.version,
             generatedText: gen.text,
+            seo: gen.seo as unknown as Prisma.InputJsonValue,
             model: gen.model,
             verifyOk: verify.ok,
             verifyNotes: verify.notes,

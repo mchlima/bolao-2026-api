@@ -3,7 +3,7 @@ import { NewsItem, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { Paginated, paginated } from '../common/pagination';
 import { ContentProcessService } from './content-process.service';
-import { ListItemsQueryDto, ReprocessItemDto } from './dto/news-item.dto';
+import { ListItemsQueryDto, ReprocessItemDto, UpdateItemSeoDto } from './dto/news-item.dto';
 
 @Injectable()
 export class NewsItemsService {
@@ -92,6 +92,15 @@ export class NewsItemsService {
       await this.prisma.newsItem.update({ where: { id }, data: { duplicateOfId: null } });
     }
     return this.getOne(id);
+  }
+
+  /** Editor polish of the SEO/GEO package: merge the sent fields onto the generated seo. */
+  async updateSeo(id: string, dto: UpdateItemSeoDto): Promise<NewsItem> {
+    const item = await this.getOne(id);
+    const current = (item.seo as Record<string, unknown> | null) ?? {};
+    const patch = Object.fromEntries(Object.entries(dto).filter(([, v]) => v !== undefined));
+    const merged = { ...current, ...patch } as Prisma.InputJsonValue;
+    return this.prisma.newsItem.update({ where: { id }, data: { seo: merged } });
   }
 
   async remove(id: string): Promise<void> {

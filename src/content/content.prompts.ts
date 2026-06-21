@@ -157,34 +157,74 @@ export function buildSearchPrompt(query: string): string {
 
 // ─────────────────────────────────────────────────────── Step 2: generate
 
+// Categorias-âncora do site (navegação + SEO). O modelo escolhe a MAIS próxima; se
+// nada servir, pode propor uma curta. Lista guia (não trava) — editável na revisão.
+export const CONTENT_CATEGORIES = [
+  'Copa do Mundo',
+  'Seleção Brasileira',
+  'Brasileirão',
+  'Libertadores',
+  'Copa do Brasil',
+  'Futebol Internacional',
+  'Análise',
+  'Bastidores',
+] as const;
+
 // The tom's style guide (NewsTone.promptText) is sandwiched between hard rules so
-// the voice can be playful while the facts stay honest.
+// the voice can be playful while the facts stay honest. A geração agora devolve um
+// PACOTE estruturado (record_article): além do corpo, o SEO/GEO/taxonomia que faz a
+// matéria ser achável no Google e citável por buscadores generativos (ChatGPT,
+// Perplexity, AI Overviews). TUDO continua preso aos fatos — inclusive dek/FAQ/takeaways.
 export function buildGenerateSystem(tonePrompt: string): string {
   return [
-    'Você é um redator esportivo que reescreve uma notícia A PARTIR DE FATOS já',
-    'apurados, em português do Brasil, com uma VOZ EDITORIAL específica.',
+    'Você é um redator e editor de SEO esportivo que produz uma matéria ORIGINAL',
+    'A PARTIR DE FATOS já apurados, em português do Brasil, com uma VOZ EDITORIAL',
+    'específica, pronta para PUBLICAR no site e ATRAIR TRÁFEGO ORGÂNICO.',
     '',
-    '═══ VOZ EDITORIAL (siga à risca) ═══',
+    '═══ VOZ EDITORIAL (siga à risca no title/dek/body) ═══',
     tonePrompt.trim(),
     '',
-    '═══ REGRAS INEGOCIÁVEIS ═══',
+    '═══ REGRAS INEGOCIÁVEIS (valem para TODOS os campos) ═══',
     '- Use APENAS os fatos fornecidos. É PROIBIDO inventar, supor ou acrescentar',
-    '  qualquer informação que não esteja nos fatos (placar, nome, data, número).',
+    '  qualquer informação que não esteja nos fatos (placar, nome, data, número) —',
+    '  isso vale também para dek, keyTakeaways, faq, metaDescription e tags.',
     '- PROIBIDO DEDUZIR CONSEQUÊNCIAS não declaradas: se um time venceu, NÃO afirme que o',
     '  outro "foi eliminado", nem "quem ele enfrenta depois", nem como o jogo se desenrolou',
     '  ("reagiu quando precisava", "situação delicada") — nada disso, a menos que esteja nos fatos.',
     '- Não copie frases do texto original (você nem o recebe) — escreva do zero.',
     '- Citações entre aspas só se vierem em quotes, sempre com atribuição a quem falou.',
-    '- Não use markdown, títulos com #, nem listas. Texto corrido, pronto para publicar.',
-    '- Comece com uma manchete curta na primeira linha, depois o corpo.',
+    '- body: texto corrido, SEM markdown, SEM títulos com #, SEM listas.',
     '',
     '═══ EXTENSÃO (o tamanho SEGUE os fatos) ═══',
-    '- O comprimento é DITADO pela quantidade de fatos. Poucos fatos → texto curto:',
+    '- O comprimento do body é DITADO pela quantidade de fatos. Poucos fatos → texto curto:',
     '  1–2 parágrafos, ou até uma nota de poucas linhas. NUNCA escreva além do que os',
-    '  fatos sustentam.',
-    '- É melhor um texto CURTO e 100% fiel do que um texto longo com invenção.',
-    '  Encher linguiça, repetir ou criar narrativa/contexto fora dos fatos é falha grave.',
-    '- Só desenvolva um fato com contexto que esteja NOS PRÓPRIOS fatos.',
+    '  fatos sustentam. Texto CURTO e 100% fiel > texto longo com invenção.',
+    '',
+    '═══ SEO (busca tradicional) ═══',
+    '- title: a manchete jornalística (na voz editorial), clara e específica, ~60–70 caracteres.',
+    '- metaTitle: o <title> da página. ≤60 caracteres, com a PALAVRA-CHAVE no começo. Pode',
+    '  ser mais direto/seco que o title (otimizado p/ clique no Google), sem clickbait.',
+    '- metaDescription: resumo atrativo de 120–155 caracteres, com a palavra-chave, que',
+    '  convide ao clique. Sem aspas, sem reticências no fim.',
+    '- slug: minúsculo, sem acento, só [a-z0-9-], 3–8 palavras com os termos-chave.',
+    '- focusKeyword: a expressão de busca principal (ex.: "brasil x marrocos copa do mundo").',
+    '- keywords: 3–6 termos secundários relacionados (entidades + intenção de busca).',
+    '',
+    '═══ GEO (otimização para buscadores generativos / IA) ═══',
+    '- dek: UMA frase que responde direto "o que aconteceu" (linha-fina/subtítulo). É o',
+    '  trecho que uma IA mais provavelmente cita — factual, completo e autossuficiente.',
+    '- keyTakeaways: 3–5 pontos curtos, factuais e extraíveis (placar, gols, números, tabela).',
+    '  Cada um deve fazer sentido lido sozinho. Sem opinião sem lastro.',
+    '- faq: 2–4 perguntas naturais que o leitor/IA faria sobre o fato (ex.: "Quem marcou os',
+    '  gols?", "Como ficou a classificação?"), com respostas CURTAS e 100% fiéis aos fatos.',
+    '',
+    '═══ TAXONOMIA ═══',
+    `- category: escolha a MAIS próxima desta lista — ${CONTENT_CATEGORIES.join(', ')}. Se`,
+    '  nenhuma servir, proponha uma categoria curta. Só UMA.',
+    '- tags: 3–8 entidades do fato (times, jogadores/técnicos, competição). Nomes canônicos curtos.',
+    '- imageAlt: alt-text descritivo p/ a imagem de capa, citando os times/contexto do fato.',
+    '',
+    'Responda SOMENTE via a ferramenta record_article, preenchendo todos os campos.',
   ].join('\n');
 }
 
@@ -202,6 +242,53 @@ export function buildGenerateContents(
   }
   return parts.join('\n');
 }
+
+// JSON Schema do artigo completo (corpo + SEO + GEO + taxonomia) — forced tool use.
+export const GENERATE_SCHEMA = {
+  type: 'object',
+  properties: {
+    title: { type: 'string', description: 'manchete jornalística na voz editorial, ~60–70 chars' },
+    body: { type: 'string', description: 'corpo da matéria, texto corrido, sem markdown/títulos/listas' },
+    dek: { type: 'string', description: 'linha-fina: 1 frase factual que responde "o que aconteceu" (GEO)' },
+    slug: { type: 'string', description: 'slug SEO: minúsculo, sem acento, [a-z0-9-], 3–8 palavras' },
+    metaTitle: { type: 'string', description: '<title> SEO, ≤60 chars, palavra-chave no começo' },
+    metaDescription: { type: 'string', description: 'meta description, 120–155 chars, com palavra-chave' },
+    focusKeyword: { type: 'string', description: 'expressão de busca principal' },
+    keywords: { type: 'array', items: { type: 'string' }, description: '3–6 termos secundários' },
+    category: { type: 'string', description: 'categoria principal (uma só)' },
+    tags: { type: 'array', items: { type: 'string' }, description: '3–8 entidades: times, pessoas, competição' },
+    keyTakeaways: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'GEO: 3–5 pontos factuais curtos, extraíveis e autossuficientes',
+    },
+    faq: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          question: { type: 'string' },
+          answer: { type: 'string' },
+        },
+        required: ['question', 'answer'],
+      },
+      description: 'GEO: 2–4 perguntas naturais + respostas curtas fiéis aos fatos',
+    },
+    imageAlt: { type: 'string', description: 'alt-text da imagem de capa' },
+  },
+  required: [
+    'title',
+    'body',
+    'dek',
+    'slug',
+    'metaTitle',
+    'metaDescription',
+    'category',
+    'tags',
+    'keyTakeaways',
+    'faq',
+  ],
+} as const;
 
 // ─────────────────────────────────────── Step 3: faithfulness check
 

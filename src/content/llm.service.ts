@@ -4,6 +4,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import {
   EXTRACT_SCHEMA,
   EXTRACT_SYSTEM,
+  GENERATE_SCHEMA,
   SEARCH_SYSTEM,
   VERIFY_SCHEMA,
   VERIFY_SYSTEM,
@@ -78,10 +79,43 @@ export function normalizeEventKey(raw: unknown): string {
     .slice(0, 120);
 }
 
+/** SEO/GEO/taxonomy package generated alongside the article body. */
+export interface ArticleSeo {
+  dek: string;
+  slug: string;
+  metaTitle: string;
+  metaDescription: string;
+  focusKeyword: string;
+  keywords: string[];
+  category: string;
+  tags: string[];
+  keyTakeaways: string[];
+  faq: { question: string; answer: string }[];
+  imageAlt: string;
+}
+
 export interface GenerateResult {
+  /** title + body joined ("manchete\n\ncorpo") — stored in generatedText for the review UI. */
   text: string;
+  title: string;
+  body: string;
+  seo: ArticleSeo;
   model: string;
   usage: Usage;
+}
+
+const asStr = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+const asStrArr = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').map((x) => x.trim()).filter(Boolean) : [];
+
+/**
+ * Texto auditável de uma geração: corpo + as superfícies GEO que também podem
+ * inventar fato (dek, takeaways, respostas do FAQ). A verificação de fidelidade
+ * roda sobre TUDO isto, não só o corpo.
+ */
+export function articleAuditText(gen: GenerateResult): string {
+  const parts = [gen.text, gen.seo.dek, ...gen.seo.keyTakeaways, ...gen.seo.faq.map((q) => q.answer)];
+  return parts.map((s) => s?.trim()).filter(Boolean).join('\n');
 }
 
 /**
@@ -199,7 +233,11 @@ export class LlmService {
     };
   }
 
-  /** Write an original article from facts only, in the given tom (optionally steered). */
+  /**
+   * Write an original article from facts only, in the given tom (optionally steered).
+   * Returns a structured package: body + SEO/GEO/taxonomy, so the article is ready to
+   * publish for organic discovery. Forced tool use keeps the shape reliable.
+   */
   async generateArticle(
     facts: Record<string, unknown>,
     tonePrompt: string,
@@ -209,18 +247,52 @@ export class LlmService {
     const client = this.assertClient();
     const res = await client.messages.create({
       model,
-      max_tokens: 4096,
+      max_tokens: 6144,
       system: buildGenerateSystem(tonePrompt),
       messages: [{ role: 'user', content: buildGenerateContents(facts, guidance) }],
+      tools: [
+        {
+          name: 'record_article',
+          description: 'Registra a matéria pronta para publicar (corpo + SEO + GEO + taxonomia).',
+          input_schema: GENERATE_SCHEMA as unknown as Anthropic.Tool['input_schema'],
+        },
+      ],
+      tool_choice: { type: 'tool', name: 'record_article' },
     });
-    const text = res.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
-      .trim();
-    if (!text) throw new Error(`Resposta vazia do modelo ${model}.`);
+    const tool = res.content.find((b) => b.type === 'tool_use');
+    if (!tool || tool.type !== 'tool_use') {
+      throw new Error(`Modelo ${model} não retornou o artigo estruturado.`);
+    }
+    const p = tool.input as Record<string, unknown>;
+    const title = asStr(p.title);
+    const body = asStr(p.body);
+    if (!title || !body) throw new Error(`Resposta incompleta do modelo ${model} (sem título/corpo).`);
+    const faq = Array.isArray(p.faq)
+      ? (p.faq as unknown[])
+          .map((q) => {
+            const o = (q ?? {}) as Record<string, unknown>;
+            return { question: asStr(o.question), answer: asStr(o.answer) };
+          })
+          .filter((q) => q.question && q.answer)
+      : [];
+    const seo: ArticleSeo = {
+      dek: asStr(p.dek),
+      slug: normalizeEventKey(p.slug), // reusa o normalizador de slug (sem acento, [a-z0-9-])
+      metaTitle: asStr(p.metaTitle) || title,
+      metaDescription: asStr(p.metaDescription),
+      focusKeyword: asStr(p.focusKeyword),
+      keywords: asStrArr(p.keywords),
+      category: asStr(p.category),
+      tags: asStrArr(p.tags),
+      keyTakeaways: asStrArr(p.keyTakeaways),
+      faq,
+      imageAlt: asStr(p.imageAlt),
+    };
     return {
-      text,
+      text: `${title}\n\n${body}`,
+      title,
+      body,
+      seo,
       model,
       usage: { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens, model },
     };

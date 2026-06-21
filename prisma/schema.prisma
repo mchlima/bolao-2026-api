@@ -973,6 +973,7 @@ model NewsItem {
   relevanceScore  Float? // 0..1 from the auto-filter
   relevanceReason String?
   facts           Json? // extracted structured facts (input to generation)
+  seo             Json? // SEO/GEO/taxonomy package generated WITH the article (slug, metaTitle/Desc, dek, category, tags, keyTakeaways, faq, imageAlt) — powers organic discovery on the public site
   toneId          String?
   toneSnapshot    String? // tom promptText at generation time
   toneVersion     Int?
