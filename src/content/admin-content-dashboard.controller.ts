@@ -10,6 +10,7 @@ export interface ContentDashboard {
   config: ContentConfig;
   today: DayUsage;
   status: Record<string, number>;
+  flagged: number; // matérias em revisão com alerta de fidelidade (verifyOk=false)
   sources: { total: number; active: number; withError: number };
   tonesActive: number;
   lastIngestAt: string | null;
@@ -26,12 +27,13 @@ export class AdminContentDashboardController {
 
   @Get()
   async get(): Promise<ContentDashboard> {
-    const [config, today, grouped, feeds, tonesActive] = await Promise.all([
+    const [config, today, grouped, feeds, tonesActive, flagged] = await Promise.all([
       this.settings.getConfig(),
       this.settings.getTodayUsage(),
       this.prisma.newsItem.groupBy({ by: ['status'], _count: true }),
       this.prisma.newsFeed.findMany({ select: { isActive: true, lastStatus: true, lastFetchedAt: true } }),
       this.prisma.newsTone.count({ where: { isActive: true } }),
+      this.prisma.newsItem.count({ where: { status: 'PENDING_REVIEW', verifyOk: false } }),
     ]);
 
     const status: Record<string, number> = {};
@@ -45,6 +47,7 @@ export class AdminContentDashboardController {
       config,
       today,
       status,
+      flagged,
       sources: {
         total: feeds.length,
         active: feeds.filter((f) => f.isActive).length,
