@@ -25,6 +25,9 @@ export const EXTRACT_SYSTEM = [
   '- Extraia SÓ o que está no texto. NÃO invente, não complete, não deduza placar.',
   '  NUNCA acrescente um nome ou detalhe ausente: se o texto diz só "Room", use "Room"',
   '  (não invente primeiro nome). Nome/número/data só se estiver LITERALMENTE no texto.',
+  '- competition/score: preencha SÓ se aparecerem EXPLÍCITOS no texto. Se a competição',
+  '  NÃO for nomeada, deixe competition "" — NUNCA adivinhe o torneio (não chute "Copa',
+  '  América", "Brasileirão" etc.). Idem placar: vazio se não estiver escrito.',
   '',
   '  ═══ APENAS FATO DURO (anti-derivação) ═══',
   '- Capture só FATOS VERIFICÁVEIS: placar, gols, eventos do jogo, estatísticas, jogadores/',
@@ -202,35 +205,55 @@ export function buildGenerateContents(
 
 // ─────────────────────────────────────── Step 3: faithfulness check
 
-// Confere o texto gerado contra os fatos. Não reescreve — só audita. Sinaliza
-// qualquer afirmação sem lastro (invenção, dedução não declarada, nome/número novo,
-// aspas de veículo) pra matéria ir pra revisão com o motivo apontado.
+// Audita o texto gerado contra a FONTE original (a verdade de fato). O auditor PODE
+// ver a fonte — só o GERADOR precisa ser cego pra não copiar. Pega dois problemas:
+// (1) FIDELIDADE: afirmação que não está na fonte ou a contradiz (ex.: competição/
+//     placar/nome trocado — inclusive erro vindo da extração);
+// (2) DERIVAÇÃO: texto colado demais na fonte (paráfrase/condensação reusando aspas,
+//     comunicados e estrutura dela, sem conteúdo independente).
 export const VERIFY_SYSTEM = [
-  'Você é um AUDITOR de fidelidade factual, em português do Brasil. Recebe os FATOS',
-  '(JSON, a única verdade) e um TEXTO gerado a partir deles. NÃO reescreva o texto.',
+  'Você é um AUDITOR editorial rigoroso, em português do Brasil. Recebe a FONTE original',
+  'e um TEXTO gerado a partir dela por outro processo. NÃO reescreva nada — só audite.',
   '',
-  'Sua tarefa: listar TODA afirmação do TEXTO que NÃO esteja sustentada pelos FATOS —',
-  'invenção, dedução de consequência não declarada (ex.: dizer que um time "foi',
-  'eliminado" ou "enfrenta X depois" sem isso nos fatos), nome/número/data novo, ou',
-  'aspas/frase atribuída a veículo de imprensa.',
+  '═══ 1) FIDELIDADE ═══',
+  'Liste TODA afirmação do TEXTO que NÃO esteja na FONTE ou que a CONTRADIGA: competição,',
+  'placar, nome, número, data trocados ou inventados; dedução de consequência não declarada',
+  '(ex.: "foi eliminado", "enfrenta X depois"). A FONTE é a verdade — se o TEXTO afirma algo',
+  'que a fonte não diz (ex.: nomeia um torneio que a fonte não nomeia), é problema.',
   '',
-  'Responda via a ferramenta record_check: ok=true só se TUDO tiver lastro; senão',
-  'ok=false e issues com uma frase curta por problema (citando o trecho). Seja rigoroso.',
+  '═══ 2) DERIVAÇÃO ═══',
+  'Avalie se o TEXTO é uma paráfrase/condensação PRÓXIMA da FONTE — reaproveitando a',
+  'expressão específica dela (aspas literais, frases de comunicado oficial, a mesma',
+  'estrutura) sem acrescentar nada independente. derivative=true se for, no fundo, a',
+  'fonte reescrita; false se usa só os FATOS crus com texto próprio.',
+  '',
+  'Responda via record_check: issues (fidelidade — uma frase curta por problema, citando',
+  'o trecho; [] se nenhum), derivative (bool) e derivativeReason (curto). Seja rigoroso.',
 ].join('\n');
 
-export function buildVerifyContents(facts: Record<string, unknown>, text: string): string {
-  return ['FATOS:', JSON.stringify(facts, null, 2), '', 'TEXTO GERADO:', text.trim()].join('\n');
+export function buildVerifyContents(source: string, text: string): string {
+  return [
+    'FONTE ORIGINAL (a verdade):',
+    (source || '(sem corpo)').trim().slice(0, 6000),
+    '',
+    'TEXTO GERADO (a auditar):',
+    text.trim(),
+  ].join('\n');
 }
 
 export const VERIFY_SCHEMA = {
   type: 'object',
   properties: {
-    ok: { type: 'boolean', description: 'true se toda afirmação do texto tem lastro nos fatos' },
     issues: {
       type: 'array',
       items: { type: 'string' },
-      description: 'uma frase curta por afirmação sem lastro (vazio se ok=true)',
+      description: 'afirmações do texto sem lastro na fonte ou que a contradizem; [] se nenhuma',
     },
+    derivative: {
+      type: 'boolean',
+      description: 'true se o texto é paráfrase/condensação próxima da fonte (reusa expressão dela)',
+    },
+    derivativeReason: { type: 'string', description: 'por que é derivado (curto); "" se não for' },
   },
-  required: ['ok', 'issues'],
+  required: ['issues', 'derivative'],
 } as const;

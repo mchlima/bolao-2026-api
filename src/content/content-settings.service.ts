@@ -7,7 +7,8 @@ export interface ContentConfig {
   paused: boolean;
   dailyBudgetUsd: number; // 0 = sem teto
   maxPerDay: number; // 0 = sem teto
-  generateModel: string; // claude-haiku-4-5 | claude-sonnet-4-6 | claude-opus-4-8
+  extractModel: string; // modelo da extração+verificação (tier analítico)
+  generateModel: string; // modelo da geração
   relevanceMin: number; // 0..1
 }
 
@@ -20,6 +21,7 @@ const DEFAULTS: ContentConfig = {
   paused: true, // robô começa DESLIGADO — liga de propósito no painel
   dailyBudgetUsd: 1,
   maxPerDay: 50,
+  extractModel: 'claude-haiku-4-5',
   generateModel: 'claude-sonnet-4-6',
   relevanceMin: 0.4,
 };

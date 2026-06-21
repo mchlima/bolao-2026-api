@@ -150,6 +150,7 @@ export class ContentProcessService {
         item.sourceTitle,
         body ?? item.sourceSummary,
         item.feed?.focus ?? null,
+        conf.extractModel,
       );
 
       // Gate 1: auto-filter. Irrelevant items park as FILTERED (rescuable).
@@ -215,8 +216,9 @@ export class ContentProcessService {
       if (!tone) throw new Error('Nenhum tom ativo configurado para gerar o texto.');
 
       const gen = await this.llm.generateArticle(extracted.facts, tone.promptText, null, conf.generateModel);
-      // Verificação de fidelidade: vai pra revisão de qualquer jeito, mas com o alerta.
-      const verify = await this.llm.verifyArticle(extracted.facts, gen.text);
+      // Auditoria contra a FONTE (fidelidade + derivação): vai pra revisão de qualquer
+      // jeito, mas com o alerta. A fonte é a verdade — pega até erro vindo da extração.
+      const verify = await this.llm.verifyArticle(effectiveBody, gen.text, conf.extractModel);
       await this.prisma.$transaction([
         this.prisma.newsItem.update({
           where: { id },
@@ -232,7 +234,7 @@ export class ContentProcessService {
             generatedText: gen.text,
             model: gen.model,
             verifyOk: verify.ok,
-            verifyNotes: verify.issues.join('\n') || null,
+            verifyNotes: verify.notes,
           },
         }),
         this.prisma.newsRevision.create({
@@ -284,13 +286,14 @@ export class ContentProcessService {
       const tone = await this.resolveTone(toneId ?? item.toneId, item.feed?.defaultToneId ?? null);
       if (!tone) throw new Error('Nenhum tom ativo configurado.');
 
+      const cfg = await this.settings.getConfig();
       const gen = await this.llm.generateArticle(
         item.facts as Record<string, unknown>,
         tone.promptText,
         guidance,
-        (await this.settings.getConfig()).generateModel,
+        cfg.generateModel,
       );
-      const verify = await this.llm.verifyArticle(item.facts as Record<string, unknown>, gen.text);
+      const verify = await this.llm.verifyArticle(item.sourceText ?? '', gen.text, cfg.extractModel);
       // Regeração de matéria já existente: soma custo (geração + verificação), sem contar nova matéria.
       await this.settings.addUsage(costUsd(gen.usage) + costUsd(verify.usage), false);
       const last = await this.prisma.newsRevision.aggregate({
@@ -310,7 +313,7 @@ export class ContentProcessService {
             generatedText: gen.text,
             model: gen.model,
             verifyOk: verify.ok,
-            verifyNotes: verify.issues.join('\n') || null,
+            verifyNotes: verify.notes,
           },
         }),
         this.prisma.newsRevision.create({

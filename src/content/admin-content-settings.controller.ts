@@ -12,6 +12,7 @@ class UpdateConfigDto {
   @IsOptional() @IsBoolean() paused?: boolean;
   @IsOptional() @IsNumber() @Min(0) @Max(1000) dailyBudgetUsd?: number;
   @IsOptional() @IsNumber() @Min(0) @Max(100000) maxPerDay?: number;
+  @IsOptional() @IsIn(MODELS) extractModel?: string;
   @IsOptional() @IsIn(MODELS) generateModel?: string;
   @IsOptional() @IsNumber() @Min(0) @Max(1) relevanceMin?: number;
 }

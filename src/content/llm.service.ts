@@ -108,10 +108,11 @@ export class LlmService {
     title: string,
     body: string | null,
     focus?: string | null,
+    model: string = MODEL_EXTRACT,
   ): Promise<ExtractResult> {
     const client = this.assertClient();
     const res = await client.messages.create({
-      model: MODEL_EXTRACT,
+      model,
       max_tokens: 2048,
       system: EXTRACT_SYSTEM,
       messages: [{ role: 'user', content: buildExtractContents(title, body, focus) }],
@@ -138,7 +139,7 @@ export class LlmService {
       reason: typeof parsed.reason === 'string' ? parsed.reason : '',
       eventKey: normalizeEventKey(parsed.eventKey),
       facts: parsed.facts ?? {},
-      usage: { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens, model: MODEL_EXTRACT },
+      usage: { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens, model },
     };
   }
 
@@ -222,21 +223,26 @@ export class LlmService {
     };
   }
 
-  /** Audit the generated text against the facts; flags any unsupported claim. */
+  /**
+   * Audit the generated text against the SOURCE (the ground truth). Catches both
+   * factual problems (incl. errors that came from extraction) and derivation
+   * (text too close to the source). Returns ok + a human-readable notes string.
+   */
   async verifyArticle(
-    facts: Record<string, unknown>,
+    source: string,
     text: string,
-  ): Promise<{ ok: boolean; issues: string[]; usage: Usage }> {
+    model: string = MODEL_EXTRACT,
+  ): Promise<{ ok: boolean; notes: string | null; usage: Usage }> {
     const client = this.assertClient();
     const res = await client.messages.create({
-      model: MODEL_EXTRACT,
+      model,
       max_tokens: 1024,
       system: VERIFY_SYSTEM,
-      messages: [{ role: 'user', content: buildVerifyContents(facts, text) }],
+      messages: [{ role: 'user', content: buildVerifyContents(source, text) }],
       tools: [
         {
           name: 'record_check',
-          description: 'Registra o resultado da auditoria de fidelidade.',
+          description: 'Registra o resultado da auditoria (fidelidade + derivação).',
           input_schema: VERIFY_SCHEMA as unknown as Anthropic.Tool['input_schema'],
         },
       ],
@@ -244,14 +250,20 @@ export class LlmService {
     });
     const tool = res.content.find((b) => b.type === 'tool_use');
     const parsed =
-      tool && tool.type === 'tool_use' ? (tool.input as { ok?: boolean; issues?: unknown }) : {};
+      tool && tool.type === 'tool_use'
+        ? (tool.input as { issues?: unknown; derivative?: boolean; derivativeReason?: unknown })
+        : {};
     const issues = Array.isArray(parsed.issues)
       ? parsed.issues.filter((i): i is string => typeof i === 'string')
       : [];
+    const derivative = parsed.derivative === true;
+    const reason = typeof parsed.derivativeReason === 'string' ? parsed.derivativeReason.trim() : '';
+    const lines = [...issues];
+    if (derivative) lines.push(`⚠ Possível derivação da fonte${reason ? `: ${reason}` : ''}`);
     return {
-      ok: parsed.ok === true && issues.length === 0,
-      issues,
-      usage: { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens, model: MODEL_EXTRACT },
+      ok: issues.length === 0 && !derivative,
+      notes: lines.length ? lines.join('\n') : null,
+      usage: { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens, model },
     };
   }
 
