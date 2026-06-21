@@ -240,6 +240,7 @@ export class ContentProcessService {
       if (!tone) throw new Error('Nenhum tom ativo configurado para gerar o texto.');
 
       const gen = await this.llm.generateArticle(extracted.facts, tone.promptText, null, conf.generateModel);
+      gen.seo.slug = this.computeSlug(item.feed?.type, null, extracted.facts, gen.title);
       // Auditoria contra a FONTE (fidelidade + derivação): vai pra revisão de qualquer
       // jeito, mas com o alerta. A fonte é a verdade — pega até erro vindo da extração.
       // Audita o pacote inteiro (corpo + dek/takeaways/FAQ), não só o corpo.
@@ -312,11 +313,7 @@ export class ContentProcessService {
     // Foco da fonte = direcionamento editorial fixo (ângulo aplicado a toda matéria).
     const steer = item.feed?.focus?.trim() || null;
     const gen = await this.llm.generateArticle(facts, tone.promptText, steer, conf.generateModel);
-    // Resumo de jogo: slug canônico no padrão dos portais (times + placar), determinístico.
-    if (item.feed?.type === 'MATCH_REPORT') {
-      const mrSlug = matchReportSlug(item.sourceTitle, facts);
-      if (mrSlug) gen.seo.slug = mrSlug;
-    }
+    gen.seo.slug = this.computeSlug(item.feed?.type, item.sourceTitle, facts, gen.title);
     const verify = await this.llm.verifyAgainstFacts(
       JSON.stringify(facts, null, 2),
       articleAuditText(gen),
@@ -390,11 +387,12 @@ export class ContentProcessService {
         steer,
         cfg.generateModel,
       );
-      // Resumo de jogo: re-crava o slug canônico (times + placar) a cada regeração.
-      if (item.feed?.type === 'MATCH_REPORT') {
-        const mrSlug = matchReportSlug(item.sourceTitle, item.facts as Record<string, unknown> | null);
-        if (mrSlug) gen.seo.slug = mrSlug;
-      }
+      gen.seo.slug = this.computeSlug(
+        item.feed?.type,
+        item.sourceTitle,
+        item.facts as Record<string, unknown> | null,
+        gen.title,
+      );
       // Item generativo (resumo de jogo): audita contra os PRÓPRIOS fatos (sem prosa-
       // fonte). Senão, contra a fonte original como as notícias de feed.
       const verify = isGenerativeFeedType(item.feed?.type)
@@ -443,6 +441,25 @@ export class ContentProcessService {
       await this.prisma.newsItem.update({ where: { id }, data: { status: 'FAILED', error: message } });
       throw err;
     }
+  }
+
+  /**
+   * Slug público DETERMINÍSTICO (nosso, não do LLM — é tarefa mecânica). Resumo de jogo =
+   * times+placar+competição (sourceTitle canônico); demais = a manchete gerada. A UNICIDADE
+   * é resolvida na aprovação (NewsItemsService.publicSlug, com dedupe contra o índice único)
+   * — só matérias publicadas competem pelo slug, então rascunho/rejeitado não "queima" nome.
+   */
+  private computeSlug(
+    feedType: string | undefined,
+    sourceTitle: string | null,
+    facts: Record<string, unknown> | null,
+    genTitle: string,
+  ): string {
+    if (feedType === 'MATCH_REPORT') {
+      const s = matchReportSlug(sourceTitle, facts);
+      if (s) return s;
+    }
+    return normalizeEventKey(genTitle) || 'materia';
   }
 
   /** Item override → feed default → oldest active tone. */

@@ -277,7 +277,7 @@ export class LlmService {
       : [];
     const seo: ArticleSeo = {
       dek: asStr(p.dek),
-      slug: normalizeEventKey(p.slug), // reusa o normalizador de slug (sem acento, [a-z0-9-])
+      slug: '', // o slug é tarefa NOSSA (determinístico + único) — preenchido no content-process
       metaTitle: asStr(p.metaTitle) || title,
       metaDescription: asStr(p.metaDescription),
       focusKeyword: asStr(p.focusKeyword),
