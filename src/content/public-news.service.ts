@@ -2,14 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { Paginated, paginated } from '../common/pagination';
-import { slugify } from './slug.util';
 import { CategoriesService } from './categories.service';
-
-/** generatedText = "manchete\n\ncorpo" → split into title + body. */
-function splitArticle(text: string | null): { title: string; body: string } {
-  const lines = (text ?? '').split('\n');
-  return { title: (lines[0] ?? '').trim(), body: lines.slice(1).join('\n').trim() };
-}
 
 interface Seo {
   dek?: string;
@@ -76,28 +69,29 @@ export interface TermPage extends TermRef {
 }
 
 type CardRow = {
-  slug: string | null;
+  slug: string;
+  title: string;
+  dek: string | null;
   seo: Prisma.JsonValue | null;
-  generatedText: string | null;
-  reviewedAt: Date | null;
   publishedAt: Date | null;
   createdAt: Date;
-  feed: { name: string } | null;
   category: { name: string; slug: string } | null;
   tags?: { name: string; slug: string }[];
+  sourceItem?: { feed: { name: string } | null } | null;
 };
 
 const CARD_SELECT = {
-  slug: true, seo: true, generatedText: true,
-  reviewedAt: true, publishedAt: true, createdAt: true,
-  feed: { select: { name: true } },
+  slug: true, title: true, dek: true, seo: true,
+  publishedAt: true, createdAt: true,
   category: { select: { name: true, slug: true } },
   tags: { select: { name: true, slug: true }, orderBy: { name: 'asc' as const } },
+  sourceItem: { select: { feed: { select: { name: true } } } },
 };
 
 /**
- * Public (logged-out) read side of approved content — the organic-traffic surface.
- * Only APPROVED items with a slug are ever exposed; drafts/rejected stay private.
+ * Public (logged-out) read side — the organic-traffic surface. Lê POSTS publicados
+ * (status=PUBLISHED) do CMS; rascunhos/arquivados ficam privados. NewsItem (esteira)
+ * nunca é exposto: só vira público quando promovido a Post e publicado.
  */
 @Injectable()
 export class PublicNewsService {
@@ -106,32 +100,19 @@ export class PublicNewsService {
     private readonly categories: CategoriesService,
   ) {}
 
-  private publishedAt(it: { reviewedAt: Date | null; publishedAt: Date | null; createdAt: Date }): Date {
-    return it.reviewedAt ?? it.publishedAt ?? it.createdAt;
-  }
-
   private toCard(it: CardRow): NewsCard {
     const seo = (it.seo as Seo | null) ?? {};
-    const { title } = splitArticle(it.generatedText);
-    // Categoria/tags canônicas (entidades vinculadas na publicação); fallback p/ seo.* em itens antigos.
-    const category: TermRef | null = it.category
-      ? { name: it.category.name, slug: it.category.slug }
-      : seo.category
-        ? { name: seo.category, slug: slugify(seo.category) }
-        : null;
-    const linked = it.tags ?? [];
-    const tags: TermRef[] = linked.length
-      ? linked.map((t) => ({ name: t.name, slug: t.slug }))
-      : (seo.tags ?? []).map((t) => ({ name: t, slug: slugify(t) }));
+    const category: TermRef | null = it.category ? { name: it.category.name, slug: it.category.slug } : null;
+    const tags: TermRef[] = (it.tags ?? []).map((t) => ({ name: t.name, slug: t.slug }));
     return {
-      slug: it.slug ?? '',
-      title,
-      dek: seo.dek ?? '',
+      slug: it.slug,
+      title: it.title,
+      dek: it.dek ?? '',
       category,
       tags,
       imageAlt: seo.imageAlt ?? '',
-      publishedAt: this.publishedAt(it).toISOString(),
-      source: it.feed?.name ?? null,
+      publishedAt: (it.publishedAt ?? it.createdAt).toISOString(),
+      source: it.sourceItem?.feed?.name ?? null,
     };
   }
 
@@ -141,9 +122,8 @@ export class PublicNewsService {
     pageSize: number,
     filter: { categorySlug?: string; tagSlug?: string } = {},
   ): Promise<Paginated<NewsCard>> {
-    const where: Prisma.NewsItemWhereInput = {
-      status: 'APPROVED',
-      slug: { not: null },
+    const where: Prisma.PostWhereInput = {
+      status: 'PUBLISHED',
       ...(filter.tagSlug ? { tags: { some: { slug: filter.tagSlug } } } : {}),
     };
     // Categoria: inclui a categoria E suas descendentes (página da pai mostra tudo abaixo).
@@ -154,35 +134,34 @@ export class PublicNewsService {
       where.categoryId = { in: cat ? await this.categories.descendantIds(cat.id) : ['__none__'] };
     }
     const [rows, total] = await this.prisma.$transaction([
-      this.prisma.newsItem.findMany({
+      this.prisma.post.findMany({
         where,
-        orderBy: [{ reviewedAt: 'desc' }, { createdAt: 'desc' }],
+        orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
         select: CARD_SELECT,
       }),
-      this.prisma.newsItem.count({ where }),
+      this.prisma.post.count({ where }),
     ]);
     return paginated(rows.map((r) => this.toCard(r)), total, page, pageSize);
   }
 
   async getBySlug(slug: string): Promise<NewsArticle> {
-    const it = await this.prisma.newsItem.findFirst({
-      where: { slug, status: 'APPROVED' },
-      select: { ...CARD_SELECT, updatedAt: true, category: { select: { id: true, name: true, slug: true } } },
+    const it = await this.prisma.post.findFirst({
+      where: { slug, status: 'PUBLISHED' },
+      select: { ...CARD_SELECT, body: true, updatedAt: true, category: { select: { id: true, name: true, slug: true } } },
     });
     if (!it) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Matéria não encontrada.' });
     const seo = (it.seo as Seo | null) ?? {};
-    const { title, body } = splitArticle(it.generatedText);
     // Caminho completo da categoria (ancestrais → folha) p/ o breadcrumb do artigo.
     const categoryPath: TermRef[] = it.category
       ? (await this.categories.pathOf(it.category.id)).map((x) => ({ name: x.name, slug: x.slug }))
       : [];
     return {
       ...this.toCard(it),
-      title,
-      body,
-      metaTitle: seo.metaTitle || title,
+      title: it.title,
+      body: it.body,
+      metaTitle: seo.metaTitle || it.title,
       metaDescription: seo.metaDescription ?? '',
       focusKeyword: seo.focusKeyword ?? '',
       keywords: seo.keywords ?? [],
@@ -200,9 +179,9 @@ export class PublicNewsService {
    * A contagem da pai inclui as filhas (roll-up), pois a página da pai mostra tudo abaixo.
    */
   async listCategories(): Promise<TermPage[]> {
-    const grouped = await this.prisma.newsItem.groupBy({
+    const grouped = await this.prisma.post.groupBy({
       by: ['categoryId'],
-      where: { status: 'APPROVED', slug: { not: null }, categoryId: { not: null } },
+      where: { status: 'PUBLISHED', categoryId: { not: null } },
       _count: { _all: true },
     });
     const direct = new Map<string, number>();
@@ -236,14 +215,14 @@ export class PublicNewsService {
 
   async listTags(): Promise<TermPage[]> {
     const tags = await this.prisma.tag.findMany({
-      where: { items: { some: { status: 'APPROVED', slug: { not: null } } } },
+      where: { posts: { some: { status: 'PUBLISHED' } } },
       orderBy: { name: 'asc' },
       select: {
         name: true, slug: true, description: true,
-        _count: { select: { items: { where: { status: 'APPROVED', slug: { not: null } } } } },
+        _count: { select: { posts: { where: { status: 'PUBLISHED' } } } },
       },
     });
-    return tags.map((t) => ({ name: t.name, slug: t.slug, description: t.description, total: t._count.items, seo: null }));
+    return tags.map((t) => ({ name: t.name, slug: t.slug, description: t.description, total: t._count.posts, seo: null }));
   }
 
   async getCategory(slug: string): Promise<TermPage> {
@@ -254,8 +233,8 @@ export class PublicNewsService {
     if (!c) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Categoria não encontrada.' });
     // total = matérias da categoria E descendentes (a página da pai mostra tudo abaixo).
     const ids = await this.categories.descendantIds(c.id);
-    const total = await this.prisma.newsItem.count({
-      where: { status: 'APPROVED', slug: { not: null }, categoryId: { in: ids } },
+    const total = await this.prisma.post.count({
+      where: { status: 'PUBLISHED', categoryId: { in: ids } },
     });
     // 404 quando não há matéria (própria/descendente): evita página vazia (soft-404).
     if (total === 0) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Categoria não encontrada.' });
@@ -272,12 +251,12 @@ export class PublicNewsService {
       where: { slug },
       select: {
         name: true, slug: true, description: true, seo: true,
-        _count: { select: { items: { where: { status: 'APPROVED', slug: { not: null } } } } },
+        _count: { select: { posts: { where: { status: 'PUBLISHED' } } } },
       },
     });
-    if (!t || t._count.items === 0) {
+    if (!t || t._count.posts === 0) {
       throw new NotFoundException({ code: 'NOT_FOUND', message: 'Tag não encontrada.' });
     }
-    return { name: t.name, slug: t.slug, description: t.description, total: t._count.items, seo: (t.seo as TermSeo | null) ?? null };
+    return { name: t.name, slug: t.slug, description: t.description, total: t._count.posts, seo: (t.seo as TermSeo | null) ?? null };
   }
 }

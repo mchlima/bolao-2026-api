@@ -200,7 +200,7 @@ export class ContentProcessService {
           where: {
             eventKey: extracted.eventKey,
             id: { not: id },
-            status: { in: ['PENDING_REVIEW', 'APPROVED'] },
+            status: { in: ['PENDING_REVIEW', 'PROMOTED'] },
             createdAt: { gte: new Date(Date.now() - DEDUP_WINDOW_MS) },
           },
           orderBy: { createdAt: 'asc' },

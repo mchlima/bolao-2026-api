@@ -945,14 +945,17 @@ model NewsTone {
   @@map("news_tones")
 }
 
-// One news item on the pipeline conveyor. Lifecycle (status):
+// One news item on the pipeline conveyor (the GENERATION ENGINE — never public on
+// its own). Lifecycle (status):
 //   DISCOVERED     — pulled from RSS, deduped, not yet processed
 //   FILTERED       — auto-filter judged it irrelevant (rescuable via override)
 //   PROCESSING     — claimed by the process cron (extract → generate)
-//   PENDING_REVIEW — generated text awaits human approval (Gate 2)
-//   APPROVED       — approved; export available
+//   PENDING_REVIEW — generated text awaits human triage (Gate 2)
+//   PROMOTED       — admin promoted it to the CMS (created a Post); see `post`
 //   REJECTED       — discarded by the reviewer
 //   FAILED         — a step errored (see error)
+// Promoting in Revisão creates a CMS Post (rascunho) — a NewsItem is NEVER served
+// to the public directly; the public reads Post (status=PUBLISHED).
 // facts holds the structured facts extracted from the source; the generation step
 // sees ONLY facts (never the source prose), so output is original, not paraphrase.
 model NewsItem {
@@ -996,7 +999,8 @@ model NewsItem {
   revisions   NewsRevision[]
   duplicateOf NewsItem?      @relation("ItemDuplicates", fields: [duplicateOfId], references: [id], onDelete: SetNull)
   duplicates  NewsItem[]     @relation("ItemDuplicates")
-  tags        Tag[]          @relation("NewsItemTags") // entidades canônicas (resolvidas na publicação a partir de seo.tags)
+  tags        Tag[]          @relation("NewsItemTags") // pré-seleção de taxonomia na revisão (carregada pro Post ao promover)
+  post        Post? // o Post criado ao promover este item pro CMS (1-1, lado inverso de Post.sourceItemId)
 
   @@unique([feedId, sourceGuid]) // idempotent ingest
   @@index([status, createdAt])
@@ -1025,6 +1029,40 @@ model NewsRevision {
   @@map("news_revisions")
 }
 
+// Post = unidade editorial do CMS (o que o admin gerencia e o público lê). Separado
+// do NewsItem: conteúdo em geração automática NÃO é um Post — só vira Post quando o
+// admin PROMOVE um item na Revisão (ou cria um post manual do zero no CMS).
+//
+// Isolamento rascunho/publicado: as COLUNAS reais (title/slug/dek/body/seo/category/
+// tags) são a VERSÃO PÚBLICA (servida quando status=PUBLISHED). `draft` é um overlay
+// JSON com as edições pendentes — só preenchido ao editar um post JÁ publicado, pra
+// que salvar nunca afete a cópia no ar. Publicar aplica `draft`→colunas e o limpa.
+//   status: DRAFT (nunca publicado, ou publicado+arquivado de volta) | PUBLISHED | ARCHIVED
+model Post {
+  id           String    @id @default(cuid())
+  title        String // manchete (versão publicada)
+  slug         String    @unique // URL pública estável (dedup no publish)
+  dek          String? // linha-fina / subtítulo
+  body         String // corpo do texto (sem a manchete)
+  seo          Json? // pacote SEO/GEO do artigo: metaTitle/metaDescription/focusKeyword/keywords/keyTakeaways/faq/imageAlt
+  status       String    @default("DRAFT")
+  publishedAt  DateTime? // 1ª publicação (define a ordem no público); null enquanto rascunho
+  draft        Json? // overlay de edições pendentes (title/slug/dek/body/seo/categoryId/tagIds); null = sem alterações não publicadas
+  categoryId   String? // categoria da versão publicada
+  sourceItemId String?   @unique // NewsItem de origem (quando veio da esteira); null em post manual
+  authorId     String? // admin dono/autor (audit, sem FK)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  tags       Tag[]     @relation("PostTags")
+  sourceItem NewsItem? @relation(fields: [sourceItemId], references: [id], onDelete: SetNull)
+
+  @@index([status, publishedAt])
+  @@index([categoryId])
+  @@map("posts")
+}
+
 // Tag editorial canônica (entidade). Os artigos guardam sugestões em seo.tags (strings);
 // ao PUBLICAR, cada nome é resolvido aqui por `slug` (find-or-create): valida se já existe
 // e cria só se não — evita duplicar "Brasil"/"brasil". Tem CRUD no admin + página pública.
@@ -1036,7 +1074,8 @@ model Tag {
   seo         Json? // metadados SEO/GEO da página da tag (manuais do admin): metaTitle/metaDescription/heading/intro/faq
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
-  items       NewsItem[] @relation("NewsItemTags")
+  items       NewsItem[] @relation("NewsItemTags") // pré-seleção na revisão
+  posts       Post[]     @relation("PostTags") // posts do CMS (dirige o público)
 
   @@map("tags")
 }
@@ -1056,7 +1095,8 @@ model Category {
   updatedAt   DateTime   @updatedAt
   parent      Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
   children    Category[] @relation("CategoryTree")
-  items       NewsItem[]
+  items       NewsItem[] // pré-seleção na revisão
+  posts       Post[] // posts do CMS (dirige o público)
 
   @@index([parentId])
   @@map("categories")

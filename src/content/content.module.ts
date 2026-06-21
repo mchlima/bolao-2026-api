@@ -16,6 +16,8 @@ import { NewsItemsService } from './news-items.service';
 import { AdminNewsFeedsController } from './admin-news-feeds.controller';
 import { AdminNewsTonesController } from './admin-news-tones.controller';
 import { AdminNewsItemsController } from './admin-news-items.controller';
+import { AdminPostsController } from './admin-posts.controller';
+import { PostsService } from './posts.service';
 import { AdminContentSettingsController } from './admin-content-settings.controller';
 import { AdminContentDashboardController } from './admin-content-dashboard.controller';
 import { PublicNewsController, PublicTaxonomyController } from './public-news.controller';
@@ -34,6 +36,7 @@ import { ContentSettingsService } from './content-settings.service';
     AdminNewsFeedsController,
     AdminNewsTonesController,
     AdminNewsItemsController,
+    AdminPostsController,
     AdminContentSettingsController,
     AdminContentDashboardController,
     AdminTagsController,
@@ -59,6 +62,7 @@ import { ContentSettingsService } from './content-settings.service';
     NewsFeedsService,
     NewsTonesService,
     NewsItemsService,
+    PostsService,
   ],
   exports: [LlmService, ContentIngestService, ContentProcessService],
 })

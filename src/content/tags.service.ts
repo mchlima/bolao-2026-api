@@ -48,11 +48,13 @@ export class TagsService {
         orderBy: { name: 'asc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: { _count: { select: { items: true } } },
+        include: { _count: { select: { posts: true } } },
       }),
       this.prisma.tag.count({ where }),
     ]);
-    return paginated(data, total, page, pageSize);
+    // _count.items mantém o contrato do admin, mas conta POSTS (o conteúdo real do CMS).
+    const mapped = data.map((t) => ({ ...t, _count: { items: t._count.posts } }));
+    return paginated(mapped, total, page, pageSize);
   }
 
   async getOne(id: string): Promise<Tag> {

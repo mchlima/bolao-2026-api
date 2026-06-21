@@ -1,20 +1,17 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { NewsItem, Prisma } from '@prisma/client';
+import { NewsItem, Post, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { Paginated, paginated } from '../common/pagination';
 import { ContentProcessService } from './content-process.service';
 import { ListItemsQueryDto, ReprocessItemDto, UpdateItemSeoDto, UpdateItemTaxonomyDto } from './dto/news-item.dto';
-import { slugify } from './slug.util';
-import { TagsService } from './tags.service';
-import { CategoriesService } from './categories.service';
+import { PostsService } from './posts.service';
 
 @Injectable()
 export class NewsItemsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly process: ContentProcessService,
-    private readonly tags: TagsService,
-    private readonly categories: CategoriesService,
+    private readonly posts: PostsService,
   ) {}
 
   async list(q: ListItemsQueryDto): Promise<Paginated<NewsItem>> {
@@ -56,29 +53,22 @@ export class NewsItemsService {
     return item;
   }
 
-  async approve(id: string, adminId: string): Promise<NewsItem> {
+  /**
+   * Promove um item da Revisão pro CMS: cria um Post (rascunho, ou já publicado se
+   * publish=true) e marca o item como PROMOTED. O item NUNCA vira público sozinho —
+   * o público lê Post. Devolve o Post criado (a UI navega pro editor do CMS).
+   */
+  async promote(id: string, adminId: string, publish: boolean): Promise<Post> {
     const item = await this.getOne(id);
     if (item.status !== 'PENDING_REVIEW') {
-      throw new BadRequestException({ code: 'INVALID_STATE', message: 'Só dá para aprovar itens em revisão.' });
+      throw new BadRequestException({ code: 'INVALID_STATE', message: 'Só dá para promover itens em revisão.' });
     }
-    // Aprovar = publicar no site. Promove um slug público estável (único) a partir do
-    // slug do SEO, com a manchete como fallback. Reusa o existente em reaprovações.
-    const slug = item.slug ?? (await this.publicSlug(id, item.seo, item.generatedText));
-    const data: Prisma.NewsItemUpdateInput = {
-      status: 'APPROVED', slug, reviewedById: adminId, reviewedAt: new Date(),
-    };
-    // Taxonomia: respeita a SELEÇÃO do admin (feita na revisão). Se ele não escolheu nada,
-    // cai no auto-resolve dos nomes sugeridos (seo.*) — esteira hands-off continua funcionando.
-    const linkedTags = (item as { tags?: { id: string }[] }).tags ?? [];
-    if (!linkedTags.length) {
-      const tags = await this.tags.resolve(this.seoTags(item.seo));
-      if (tags.length) data.tags = { set: tags.map((t) => ({ id: t.id })) };
-    }
-    if (!item.categoryId) {
-      const category = await this.categories.resolve(this.seoCategory(item.seo));
-      if (category) data.category = { connect: { id: category.id } };
-    }
-    return this.prisma.newsItem.update({ where: { id }, data });
+    const post = await this.posts.createFromItem(item, adminId, publish);
+    await this.prisma.newsItem.update({
+      where: { id },
+      data: { status: 'PROMOTED', reviewedById: adminId, reviewedAt: new Date() },
+    });
+    return post;
   }
 
   /** Admin seleciona categoria + tags (entidades) na revisão — sobrepõe os sugeridos. */
@@ -93,36 +83,6 @@ export class NewsItemsService {
     }
     await this.prisma.newsItem.update({ where: { id }, data });
     return this.getOne(id);
-  }
-
-  /** Nomes de tag sugeridos no pacote SEO (strings). */
-  private seoTags(seo: Prisma.JsonValue | null): string[] {
-    const t = (seo as { tags?: unknown } | null)?.tags;
-    return Array.isArray(t) ? t.filter((x): x is string => typeof x === 'string') : [];
-  }
-
-  /** Nome de categoria sugerido no pacote SEO. */
-  private seoCategory(seo: Prisma.JsonValue | null): string {
-    const c = (seo as { category?: unknown } | null)?.category;
-    return typeof c === 'string' ? c : '';
-  }
-
-  /** Unique public slug: seo.slug → manchete → fallback, deduped against news_items.slug. */
-  private async publicSlug(
-    id: string,
-    seo: Prisma.JsonValue | null,
-    generatedText: string | null,
-  ): Promise<string> {
-    const seoSlug = (seo as { slug?: unknown } | null)?.slug;
-    const headline = (generatedText ?? '').split('\n')[0] ?? '';
-    const base = slugify((typeof seoSlug === 'string' && seoSlug) || headline || 'materia');
-    let slug = base;
-    for (let i = 2; i < 60; i++) {
-      const clash = await this.prisma.newsItem.findFirst({ where: { slug, id: { not: id } }, select: { id: true } });
-      if (!clash) return slug;
-      slug = `${base}-${i}`;
-    }
-    return `${base}-${id.slice(-6)}`;
   }
 
   async reject(id: string, adminId: string): Promise<NewsItem> {

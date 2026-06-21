@@ -43,7 +43,7 @@ export class CategoriesService {
   /** Todas as categorias em ordem DFS, com profundidade, caminho e contagem. */
   async tree(): Promise<CategoryNode[]> {
     const all = await this.prisma.category.findMany({
-      include: { _count: { select: { items: true } } },
+      include: { _count: { select: { posts: true } } },
     });
     const byParent = new Map<string | null, typeof all>();
     for (const c of all) {
@@ -58,7 +58,7 @@ export class CategoriesService {
         const pathLabel = [...prefix, c.name];
         out.push({
           id: c.id, name: c.name, slug: c.slug, description: c.description,
-          parentId: c.parentId, depth, pathLabel, items: c._count.items, seo: c.seo,
+          parentId: c.parentId, depth, pathLabel, items: c._count.posts, seo: c.seo,
         });
         walk(c.id, depth + 1, pathLabel);
       }

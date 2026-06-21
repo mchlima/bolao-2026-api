@@ -17,7 +17,7 @@ export const NEWS_ITEM_STATUSES = [
   'FILTERED',
   'PROCESSING',
   'PENDING_REVIEW',
-  'APPROVED',
+  'PROMOTED',
   'REJECTED',
   'FAILED',
   'DUPLICATE',
@@ -80,6 +80,13 @@ export class UpdateItemTaxonomyDto {
   @ArrayMaxSize(20)
   @IsString({ each: true })
   tagIds?: string[];
+}
+
+/** Promoção do item pro CMS: rascunho por padrão; publish=true já publica. */
+export class PromoteItemDto {
+  @IsOptional()
+  @IsBoolean()
+  publish?: boolean;
 }
 
 export class ReprocessItemDto {
