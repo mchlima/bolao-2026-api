@@ -5,6 +5,18 @@ import { Paginated, paginated } from '../common/pagination';
 import { ContentProcessService } from './content-process.service';
 import { ListItemsQueryDto, ReprocessItemDto, UpdateItemSeoDto } from './dto/news-item.dto';
 
+function slugify(s: string): string {
+  return (
+    s
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80) || 'materia'
+  );
+}
+
 @Injectable()
 export class NewsItemsService {
   constructor(
@@ -54,10 +66,31 @@ export class NewsItemsService {
     if (item.status !== 'PENDING_REVIEW') {
       throw new BadRequestException({ code: 'INVALID_STATE', message: 'Só dá para aprovar itens em revisão.' });
     }
+    // Aprovar = publicar no site. Promove um slug público estável (único) a partir do
+    // slug do SEO, com a manchete como fallback. Reusa o existente em reaprovações.
+    const slug = item.slug ?? (await this.publicSlug(id, item.seo, item.generatedText));
     return this.prisma.newsItem.update({
       where: { id },
-      data: { status: 'APPROVED', reviewedById: adminId, reviewedAt: new Date() },
+      data: { status: 'APPROVED', slug, reviewedById: adminId, reviewedAt: new Date() },
     });
+  }
+
+  /** Unique public slug: seo.slug → manchete → fallback, deduped against news_items.slug. */
+  private async publicSlug(
+    id: string,
+    seo: Prisma.JsonValue | null,
+    generatedText: string | null,
+  ): Promise<string> {
+    const seoSlug = (seo as { slug?: unknown } | null)?.slug;
+    const headline = (generatedText ?? '').split('\n')[0] ?? '';
+    const base = slugify((typeof seoSlug === 'string' && seoSlug) || headline || 'materia');
+    let slug = base;
+    for (let i = 2; i < 60; i++) {
+      const clash = await this.prisma.newsItem.findFirst({ where: { slug, id: { not: id } }, select: { id: true } });
+      if (!clash) return slug;
+      slug = `${base}-${i}`;
+    }
+    return `${base}-${id.slice(-6)}`;
   }
 
   async reject(id: string, adminId: string): Promise<NewsItem> {

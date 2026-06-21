@@ -974,6 +974,7 @@ model NewsItem {
   relevanceReason String?
   facts           Json? // extracted structured facts (input to generation)
   seo             Json? // SEO/GEO/taxonomy package generated WITH the article (slug, metaTitle/Desc, dek, category, tags, keyTakeaways, faq, imageAlt) — powers organic discovery on the public site
+  slug            String?   @unique // stable public URL slug, promoted from seo.slug on approval (null until published)
   toneId          String?
   toneSnapshot    String? // tom promptText at generation time
   toneVersion     Int?
