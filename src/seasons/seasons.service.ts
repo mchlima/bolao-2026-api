@@ -13,9 +13,10 @@ export class SeasonsService {
   async findAll(
     query: QuerySeasonsDto,
   ): Promise<Paginated<Season & { matchCount: number }>> {
-    const { page, pageSize, search, status, competitionId } = query;
+    const { page, pageSize, search, status, slug, competitionId } = query;
     const where: Prisma.SeasonWhereInput = {
       ...(status && { status }),
+      ...(slug && { slug }),
       ...(competitionId && { competitionId }),
       ...(search && { name: { contains: search, mode: 'insensitive' } }),
     };
@@ -56,12 +57,31 @@ export class SeasonsService {
   }
 
   create(dto: CreateSeasonDto): Promise<Season> {
-    return this.prisma.season.create({ data: dto });
+    const { broadcasters, ...rest } = dto;
+    return this.prisma.season.create({
+      data: {
+        ...rest,
+        ...(broadcasters !== undefined && {
+          broadcasters: broadcasters as unknown as Prisma.InputJsonValue,
+        }),
+      },
+    });
   }
 
   async update(id: string, dto: UpdateSeasonDto): Promise<Season> {
     await this.findOne(id);
-    return this.prisma.season.update({ where: { id }, data: dto });
+    // broadcasters is a JSON column — separate it so Prisma types it as
+    // InputJsonValue (the DTO's optional `url?` doesn't fit JSON directly).
+    const { broadcasters, ...rest } = dto;
+    return this.prisma.season.update({
+      where: { id },
+      data: {
+        ...rest,
+        ...(broadcasters !== undefined && {
+          broadcasters: broadcasters as unknown as Prisma.InputJsonValue,
+        }),
+      },
+    });
   }
 
   async remove(id: string): Promise<void> {

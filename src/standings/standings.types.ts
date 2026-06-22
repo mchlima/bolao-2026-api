@@ -15,6 +15,7 @@ export interface MyPoolStanding extends MyStanding {
 /** A tournament the user plays: its GERAL (season-wide) standing + their pools. */
 export interface MyStandingsTournament {
   id: string;
+  slug: string | null;
   name: string;
   status: SeasonStatus;
   general: MyStanding;

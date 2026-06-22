@@ -30,6 +30,7 @@ import {
 
 const TOURNAMENT_SELECT = {
   id: true,
+  slug: true,
   name: true,
   logoUrl: true,
   status: true,

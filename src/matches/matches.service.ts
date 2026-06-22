@@ -17,12 +17,14 @@ const MATCH_INCLUDE = {
   season: {
     select: {
       id: true,
+      slug: true,
       name: true,
       status: true,
       startDate: true,
       endDate: true,
       location: true,
       logoUrl: true,
+      broadcasters: true,
       competition: { select: { country: true, confederation: true } },
     },
   },

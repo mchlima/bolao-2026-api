@@ -10,6 +10,7 @@ import type {
 
 const TOURNAMENT_SELECT = {
   id: true,
+  slug: true,
   name: true,
   logoUrl: true,
   status: true,
@@ -92,7 +93,7 @@ export class StandingsService {
   }
 
   private async buildTournament(
-    season: { id: string; name: string; status: SeasonStatus },
+    season: { id: string; slug: string | null; name: string; status: SeasonStatus },
     pools: PoolEntry[],
     userId: string,
   ): Promise<MyStandingsTournament> {
@@ -106,6 +107,7 @@ export class StandingsService {
 
     return {
       id: season.id,
+      slug: season.slug,
       name: season.name,
       status: season.status,
       general,
@@ -141,7 +143,7 @@ export class StandingsService {
 }
 
 type PoolRunWithSeason = PoolRun & {
-  season: { id: string; name: string; logoUrl: string | null; status: SeasonStatus };
+  season: { id: string; slug: string | null; name: string; logoUrl: string | null; status: SeasonStatus };
 };
 interface PoolEntry {
   poolId: string;

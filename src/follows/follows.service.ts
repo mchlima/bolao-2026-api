@@ -6,7 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 const UPCOMING_INCLUDE = {
   homeTeam: true,
   awayTeam: true,
-  season: { select: { id: true, name: true, status: true } },
+  season: { select: { id: true, slug: true, name: true, status: true } },
   round: { select: { number: true, name: true } },
   stadium: true,
 } satisfies Prisma.MatchInclude;

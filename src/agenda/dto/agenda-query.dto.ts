@@ -22,6 +22,12 @@ export class AgendaQueryDto {
   @IsString()
   sportId?: string;
 
+  // Filtra os jogos de um time específico (mandante OU visitante) — alimenta a
+  // página pública da seleção/time.
+  @IsOptional()
+  @IsString()
+  teamId?: string;
+
   // Optional explicit date window (YYYY-MM-DD, interpreted in America/São_Paulo).
   @IsOptional()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'from deve ser YYYY-MM-DD' })

@@ -12,6 +12,7 @@ const AGENDA_INCLUDE = {
   season: {
     select: {
       id: true,
+      slug: true,
       name: true,
       status: true,
       competition: {
@@ -61,6 +62,10 @@ export class AgendaService {
     if (query.seasonId) baseWhere.seasonId = query.seasonId;
     else if (query.competitionId) baseWhere.season = { competitionId: query.competitionId };
     else if (query.sportId) baseWhere.season = { competition: { sportId: query.sportId } };
+    // Jogos de um time (mandante ou visitante). AND (não OR no topo) p/ não colidir
+    // com o where.OR que o scope 'upcoming' define adiante.
+    if (query.teamId)
+      baseWhere.AND = [{ OR: [{ homeTeamId: query.teamId }, { awayTeamId: query.teamId }] }];
 
     const where: Prisma.MatchWhereInput = { ...baseWhere };
 

@@ -1,13 +1,16 @@
 import { SeasonFormat, SeasonStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
+  IsArray,
   IsDate,
   IsEnum,
   IsOptional,
   IsString,
   MaxLength,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
+import { BroadcasterDto } from './broadcaster.dto';
 
 export class UpdateSeasonDto {
   @IsOptional()
@@ -53,4 +56,11 @@ export class UpdateSeasonDto {
   @IsOptional()
   @IsEnum(SeasonFormat)
   format?: SeasonFormat;
+
+  // Curated "onde assistir" rights holders (display-only). Send [] to clear.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BroadcasterDto)
+  broadcasters?: BroadcasterDto[];
 }

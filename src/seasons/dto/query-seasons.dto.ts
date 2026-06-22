@@ -7,6 +7,11 @@ export class QuerySeasonsDto extends PaginationQueryDto {
   @IsEnum(SeasonStatus)
   status?: SeasonStatus;
 
+  /** Resolve um torneio pelo slug (rota pública /futebol/torneios/:slug). */
+  @IsOptional()
+  @IsString()
+  slug?: string;
+
   @IsOptional()
   @IsString()
   competitionId?: string;

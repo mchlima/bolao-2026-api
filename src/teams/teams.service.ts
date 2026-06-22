@@ -11,7 +11,7 @@ export class TeamsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async findAll(query: QueryTeamsDto): Promise<Paginated<Team>> {
-    const { page, pageSize, search, type, continent, country, sort, hasLogo, match } =
+    const { page, pageSize, search, type, slug, continent, country, sort, hasLogo, match } =
       query;
     const searchOr: Prisma.TeamWhereInput[] = search
       ? [
@@ -37,6 +37,7 @@ export class TeamsService {
       : [];
     const where: Prisma.TeamWhereInput = {
       ...(type && { type }),
+      ...(slug && { slug }),
       ...(continent && { continent }),
       ...(country && { country }),
       ...(hasLogo === 'true' && { logoUrl: { not: null } }),

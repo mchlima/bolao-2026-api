@@ -7,6 +7,11 @@ export class QueryTeamsDto extends PaginationQueryDto {
   @IsEnum(TeamType)
   type?: TeamType;
 
+  /** Resolve um time pelo slug (página pública /futebol/selecoes/:slug). */
+  @IsOptional()
+  @IsString()
+  slug?: string;
+
   @IsOptional()
   @IsString()
   continent?: string;

@@ -361,9 +361,17 @@ model Season {
   id            String       @id @default(cuid())
   competitionId String
   name          String // full display name, e.g. "Copa do Mundo FIFA 2026"
+  // URL-safe slug derivado do nome (sem "FIFA"), ex.: "copa-do-mundo-2026". Único
+  // global; usado nas rotas públicas /futebol/torneios/:slug. Backfill preenche.
+  slug          String?      @unique
   seasonLabel   String? // edition label, e.g. "2026", "2025/26"
   logoUrl       String?
   location      String? // host city/country of the edition, e.g. "Estados Unidos, Canadá e México" (feeds SportsEvent JSON-LD)
+  // Curated broadcasters (rights holders) for this edition, e.g.
+  // [{ "name": "CazéTV", "url": "https://www.youtube.com/@CazeTV" }]. Display-only:
+  // feeds the "onde assistir" on the public match page (text + FAQ + title). Null/
+  // empty = we don't claim a broadcaster (never auto-derived; ESPN carries US TV).
+  broadcasters  Json?
   startDate     DateTime?
   endDate       DateTime?
   status        SeasonStatus @default(DRAFT)
@@ -503,6 +511,9 @@ model Team {
   id          String   @id @default(cuid())
   sportId     String // the sport this team belongs to (default: Futebol)
   name        String
+  // URL-safe slug derivado do nome (ex.: "brasil") p/ a página pública da
+  // seleção/time (/futebol/selecoes/:slug). Único global; preenchido por backfill.
+  slug        String?  @unique
   shortName   String // sigla de EXIBIÇÃO (pode ser pt-BR, ex.: EUA, ALE, COR)
   type        TeamType
   // NATIONAL_TEAM:
