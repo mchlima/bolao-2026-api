@@ -206,6 +206,16 @@ export class MatchesService {
     });
   }
 
+  /** Edita um comentário (texto/tempo) sem alterar createdAt — a ordem no chat é preservada. */
+  async updateNote(matchId: string, noteId: string, text: string, minute: string | null): Promise<MatchNote> {
+    const note = await this.prisma.matchNote.findFirst({ where: { id: noteId, matchId }, select: { id: true } });
+    if (!note) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Comentário não encontrado.' });
+    return this.prisma.matchNote.update({
+      where: { id: noteId },
+      data: { text: text.trim(), minute: minute?.trim() || null },
+    });
+  }
+
   async removeNote(matchId: string, noteId: string): Promise<void> {
     await this.prisma.matchNote.deleteMany({ where: { id: noteId, matchId } });
   }

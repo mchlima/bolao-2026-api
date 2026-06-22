@@ -62,6 +62,15 @@ export class AdminMatchesController {
     return this.matches.addNote(id, dto.text, dto.minute ?? null, admin.id);
   }
 
+  @Patch(':id/notes/:noteId')
+  updateNote(
+    @Param('id') id: string,
+    @Param('noteId') noteId: string,
+    @Body() dto: CreateMatchNoteDto,
+  ): Promise<MatchNote> {
+    return this.matches.updateNote(id, noteId, dto.text, dto.minute ?? null);
+  }
+
   @Delete(':id/notes/:noteId')
   @HttpCode(204)
   removeNote(@Param('id') id: string, @Param('noteId') noteId: string): Promise<void> {
