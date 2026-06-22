@@ -14,6 +14,7 @@ export interface PackBlocks {
   classificacao: boolean;
   proximaRodada: boolean;
   comentariosDoEditor: boolean;
+  narracaoEspn: boolean;
 }
 
 export const DEFAULT_BLOCKS: PackBlocks = {
@@ -27,6 +28,7 @@ export const DEFAULT_BLOCKS: PackBlocks = {
   classificacao: true,
   proximaRodada: true,
   comentariosDoEditor: true,
+  narracaoEspn: true,
 };
 
 const DEFAULT_NOTABLE_CAP = 4;
@@ -89,6 +91,7 @@ export class MatchFactPackService {
         stats: { include: { team: true } },
         lineupEntries: { include: { player: true } },
         notes: { orderBy: { createdAt: 'asc' } },
+        commentary: { orderBy: [{ clockValue: 'asc' }, { sequence: 'asc' }] },
       },
     });
     if (!match || match.status !== 'FINISHED' || !match.homeTeam || !match.awayTeam) return null;
@@ -231,6 +234,17 @@ export class MatchFactPackService {
       facts.comentariosDoEditor = match.notes.map((n) =>
         n.minute ? `${n.minute} — ${n.text}` : n.text,
       );
+    }
+
+    // Narração humana minuto-a-minuto da ESPN (prosa em INGLÊS, retida verbatim) —
+    // a fonte rica de lance a lance. Vira português na geração. Prefixa minuto +
+    // time quando houver, pra o modelo ancorar cada lance no tempo certo.
+    if (blocks.narracaoEspn && match.commentary.length) {
+      facts.narracaoEspn = match.commentary.map((c) => {
+        const time = c.minute ? `${c.minute} ` : '';
+        const side = c.teamId ? `[${teamName(c.teamId)}] ` : '';
+        return `${time}${side}${c.text}`.trim();
+      });
     }
 
     return { facts, title };

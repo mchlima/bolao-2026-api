@@ -315,6 +315,10 @@ model Competition {
   sportId        String // the sport this competition belongs to (default: Futebol)
   name           String
   slug           String // internal stable key, e.g. "fifa.world", "bra.1" (unique per sport)
+  // Slug PÚBLICO de URL (ex.: "brasileirao-serie-a", "copa-do-mundo"), usado nas
+  // rotas /futebol/campeonato/:urlSlug. Distinto do slug interno (com ponto do
+  // provider). Único global. Backfill preenche.
+  urlSlug        String?         @unique
   type           CompetitionType
   country        String? // null for international/continental competitions
   confederation  String? // "FIFA", "UEFA", "CONMEBOL", "CBF"...
@@ -601,6 +605,11 @@ model MatchEvent {
   espnEventId     String?  @unique // ESPN keyEvent id — idempotency
   text            String?
   detail          String? // short pt label: goal method, VAR decision, delay reason, penalty miss/save
+  // Geometria do chute (ESPN dá em gols/pênaltis): onde a bola cruzou a linha do gol
+  // (goalY, 0–100 lateral) e de onde saiu o chute (fieldX/Y, 0–100). Null quando ausente.
+  goalY           Float?
+  fieldX          Float?
+  fieldY          Float?
   createdAt       DateTime @default(now())
 
   match   Match   @relation(fields: [matchId], references: [id], onDelete: Cascade)
@@ -722,6 +731,10 @@ model Match {
   awayFormation   String?
   // Live match clock from ESPN (e.g. "67'"), set while LIVE, cleared on finish.
   liveClock       String?
+  // Quando o jogo FINALIZOU de fato (apito), setado uma vez no flip pra FINISHED.
+  // Ancora a janela de ingestão pós-jogo (parar 1h após o fim REAL, não kickoff+Nh),
+  // pra jogo paralisado/atrasado não sair da janela antes de terminar.
+  finishedAt      DateTime?
   winner          MatchWinner? // explicit result orientation when FINISHED
   duration        MatchDuration? // REGULAR / EXTRA_TIME / PENALTY_SHOOTOUT
   // Free-text fallbacks kept for back-compat/display; structure now lives in the FKs above.
@@ -756,6 +769,7 @@ model Match {
   followers     FollowedMatch[]
   newsItems     NewsItem[]
   notes         MatchNote[]
+  commentary    MatchCommentary[]
 
   @@unique([seasonId, matchNumber]) // idempotent fixture seeding
   @@index([seasonId])
@@ -781,6 +795,32 @@ model MatchNote {
 
   @@index([matchId])
   @@map("match_notes")
+}
+
+// Narração humana minuto-a-minuto da ESPN (feed `commentary` do summary), retida
+// VERBATIM (prosa em inglês) — diferente da timeline (MatchEvent), que é
+// language-free. É a matéria-prima rica das notícias: o MatchFactPackService
+// injeta em facts.narracaoEspn. Acumulada por upsert em espnId ("cmt:<id>" ou
+// "seq:<n>"), pois o feed ao vivo é janela deslizante; assim o histórico completo
+// se reconstrói entre os ticks. teamId é coluna simples (sem relação) — resolvido
+// a partir do header ESPN; o time só pode ser o mandante/visitante da partida.
+model MatchCommentary {
+  id         String   @id @default(cuid())
+  matchId    String
+  teamId     String? // nosso teamId (mandante/visitante) quando o lance tem time
+  espnId     String   @unique // "cmt:<playId>" | "seq:<n>" — idempotência
+  sequence   Int      @default(0) // ordem do feed ESPN
+  type       String? // tipo do play ESPN (foul/shot-on-target/goal/…) quando houver
+  minute     String? // "78'", "45'+2'"
+  clockValue Int      @default(0) // segundos no jogo, para ordenar
+  period     Int      @default(1)
+  text       String // a prosa humana, como veio da ESPN
+  createdAt  DateTime @default(now())
+
+  match Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  @@index([matchId])
+  @@map("match_commentary")
 }
 
 model Prediction {

@@ -6,6 +6,7 @@ import { EventsService } from '../events/events.service';
 import { MonitorService } from '../monitor/monitor.service';
 import {
   clockGoesBack,
+  EspnCommentaryLine,
   EspnEvent,
   EspnMatchEvent,
   EspnService,
@@ -41,10 +42,17 @@ const STAT_MAP: Record<string, { label: string; order: number }> = {
   totalPasses: { label: 'Passes', order: 11 },
 };
 
-// Lineups publish ~1h before kickoff, so open the summary window earlier than the
-// score robot's; keep ingesting until a few hours after kickoff.
+// Janela de ingestão. Lineups saem ~1h antes → abrimos cedo (PRE_WINDOW_MIN). O fim
+// é ancorado no APITO REAL (finishedAt), não em kickoff+Nh: paramos só POST_FINISH_MIN
+// depois do jogo terminar de fato — assim jogo paralisado/atrasado não sai da janela
+// antes de acabar. LIVE fica sempre na janela (com uma trava de segurança contra um
+// LIVE "zumbi" que nunca finaliza). SCHEDULED entra um pouco antes e também um tempo
+// DEPOIS do horário (kickoff pode passar antes do robô detectar o início).
 const PRE_WINDOW_MIN = 75;
-const POST_WINDOW_HOURS = 3;
+const SCHEDULED_GRACE_HOURS = 3; // kickoff já passou mas ainda não virou LIVE
+const LIVE_MAX_HOURS = 8; // trava: para de insistir num LIVE travado após 8h de kickoff
+const POST_FINISH_MIN = 60; // segue ingerindo até 1h DEPOIS do apito real
+const FINISH_FALLBACK_HOURS = 3.5; // FINISHED legado sem finishedAt (jogo antigo/seed)
 const TICK_CRON = '*/15 * * * * *'; // every 15s (60/15 → even spacing). One tick =
 // 1 scoreboard fetch per league (batch baseline) + 1 summary fetch per in-window
 // match (lineup + keyEvents + commentary + stats). On a busy fixture day that risks
@@ -105,23 +113,33 @@ export class MatchSummaryService {
     // matches (autoManaged:false) are NOT filtered out here — they still get their
     // narration/lineup/stats from the feed; ingest() only skips the score/status/
     // clock/cards merge for them (those the admin owns).
+    const ms = now.getTime();
     const candidates = await this.prisma.match.findMany({
       where: {
         homeTeamId: { not: null },
         awayTeamId: { not: null },
         OR: [
-          { status: 'LIVE' },
+          // LIVE sempre na janela (jogo paralisado/com muito acréscimo segue sendo
+          // ingerido), com trava contra um LIVE que nunca finaliza.
+          { status: 'LIVE', kickoffAt: { gte: new Date(ms - LIVE_MAX_HOURS * 3_600_000) } },
+          // Pré-jogo (lineups) + folga depois do horário (kickoff pode passar antes do
+          // robô flipar pra LIVE).
           {
-            // Kept ingesting well past the final whistle (FINISHED stays in window
-            // for the whole post-window), so trailing data — a late VAR ruling, the
-            // closing commentary, the final stats — is still captured. The displayed
-            // status flipping to FINISHED never gates ingestion off (events are
-            // append-only); only the chip changes.
-            status: { in: ['SCHEDULED', 'FINISHED'] },
+            status: 'SCHEDULED',
             kickoffAt: {
-              gte: new Date(now.getTime() - POST_WINDOW_HOURS * 3_600_000),
-              lte: new Date(now.getTime() + PRE_WINDOW_MIN * 60_000),
+              gte: new Date(ms - SCHEDULED_GRACE_HOURS * 3_600_000),
+              lte: new Date(ms + PRE_WINDOW_MIN * 60_000),
             },
+          },
+          // Pós-apito: segue ingerindo até 1h DEPOIS do fim REAL (finishedAt), pra
+          // pegar VAR tardio, a narração de fechamento e as stats finais.
+          { status: 'FINISHED', finishedAt: { gte: new Date(ms - POST_FINISH_MIN * 60_000) } },
+          // Fallback p/ FINISHED sem finishedAt (jogos antigos/seed): janela curta por
+          // kickoff, pra não ingerir histórico inteiro nem perder o pós-jogo recente.
+          {
+            status: 'FINISHED',
+            finishedAt: null,
+            kickoffAt: { gte: new Date(ms - FINISH_FALLBACK_HOURS * 3_600_000) },
           },
         ],
       },
@@ -375,6 +393,12 @@ export class MatchSummaryService {
     if (match.autoManaged && target) {
       matchData.status = target;
       statusChanged = true;
+      // Carimba o apito real UMA vez (no flip pra FINISHED) — a janela de ingestão
+      // pós-jogo conta 1h a partir daqui, não de kickoff+Nh. Assim um jogo paralisado
+      // que termina tarde ainda é ingerido até o fim (e o pós-apito).
+      if (target === 'FINISHED' && match.status !== 'FINISHED') {
+        matchData.finishedAt = new Date();
+      }
     }
 
     if (match.autoManaged && states.some((s) => s === 'in' || s === 'post')) {
@@ -506,6 +530,7 @@ export class MatchSummaryService {
         match.homeTeamId,
         match.awayTeamId,
       );
+      await this.persistCommentary(matchId, full.commentary, espnTeamMap);
     }
 
     // A flip to FINISHED may decide a group or feed a knockout slot — re-resolve.
@@ -646,6 +671,9 @@ export class MatchSummaryService {
         playerId,
         relatedPlayerId,
         text: ev.text,
+        goalY: ev.goalY ?? null,
+        fieldX: ev.fieldX ?? null,
+        fieldY: ev.fieldY ?? null,
       };
       await this.prisma.matchEvent.upsert({
         where: { espnEventId: ev.espnId },
@@ -696,6 +724,36 @@ export class MatchSummaryService {
       }
     }
     return changed;
+  }
+
+  /** Persist the full human commentary prose (idempotent by espnId). ESPN serves a
+   * sliding window live, so upsert-by-id accumulates the complete feed across ticks.
+   * Stored verbatim (not language-stripped like the timeline) — it's the rich source
+   * the news generator reads via facts.narracaoEspn. teamId resolved from the ESPN
+   * header map; left null for play-less narrative lines (kickoff, added time, …). */
+  private async persistCommentary(
+    matchId: string,
+    lines: EspnCommentaryLine[],
+    espnTeamMap: Map<string, string>,
+  ): Promise<void> {
+    if (!lines.length) return;
+    for (const l of lines) {
+      const teamId = l.espnTeamId ? (espnTeamMap.get(l.espnTeamId) ?? null) : null;
+      const data = {
+        teamId,
+        sequence: l.sequence,
+        type: l.type,
+        minute: l.minute,
+        clockValue: l.clockValue,
+        period: l.period,
+        text: l.text,
+      };
+      await this.prisma.matchCommentary.upsert({
+        where: { espnId: l.espnId },
+        update: data,
+        create: { matchId, espnId: l.espnId, ...data },
+      });
+    }
   }
 
   /** Resolve a player by name within a team — the fallback for feeds (commentary)

@@ -8,6 +8,11 @@ export interface TimelineEvent {
   player: string | null; // scorer / booked / subbed-in
   related: string | null; // assist / subbed-off
   detail: string | null; // goal method, VAR decision, delay reason, penalty miss/save
+  // Shot geometry (ESPN, em gols/pênaltis): onde a bola cruzou a linha (goalY, 0–100
+  // lateral) e de onde saiu o chute (fieldX/Y, 0–100). Null quando ausente.
+  goalY: number | null;
+  fieldX: number | null;
+  fieldY: number | null;
 }
 export interface TimelinePeriod {
   period: number;
@@ -75,6 +80,9 @@ export class TimelineService {
             clockValue: true,
             teamId: true,
             detail: true,
+            goalY: true,
+            fieldX: true,
+            fieldY: true,
             player: { select: { name: true } },
             related: { select: { name: true } },
           },
@@ -126,6 +134,9 @@ export class TimelineService {
         player: e.player?.name ?? null,
         related: e.related?.name ?? null,
         detail: e.detail,
+        goalY: e.goalY ?? null,
+        fieldX: e.fieldX ?? null,
+        fieldY: e.fieldY ?? null,
       });
     }
     const periods = [...byPeriod.entries()]

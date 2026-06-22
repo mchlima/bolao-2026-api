@@ -139,6 +139,12 @@ export interface EspnMatchEvent {
   playerName?: string | null;
   relatedName?: string | null;
   text: string | null;
+  // Shot geometry (ESPN gives these on goals/penalties): where the ball crossed the
+  // goal line (goalY, 0–100 lateral) and where the shot was struck (fieldX/Y, 0–100).
+  // Null when ESPN omits them. Powers the goal-mouth mini-viz on the web timeline.
+  goalY?: number | null;
+  fieldX?: number | null;
+  fieldY?: number | null;
 }
 
 /** Pitch method behind a goal, from the ESPN type label ("Goal - Header" etc.). */
@@ -333,6 +339,61 @@ interface EspnCommentaryPlay {
   clock?: { value?: number; displayValue?: string };
   team?: { displayName?: string };
   participants?: Array<{ athlete?: { displayName?: string } }>;
+}
+
+/** A row of the `commentary` array: the human prose lives at the top level
+ * (`text`/`time`/`sequence`); a `play` is attached when the line maps to a typed
+ * play (foul/shot/goal/…). Pure-narrative lines (kickoff, added time) have no play. */
+interface EspnCommentaryEntry {
+  sequence?: number;
+  time?: { value?: number; displayValue?: string };
+  text?: string;
+  play?: EspnCommentaryPlay;
+}
+
+/** The full human play-by-play retained verbatim — the news fact-pack source. Unlike
+ * the typed timeline (language-free), this keeps ESPN's prose for the generator. */
+export interface EspnCommentaryLine {
+  espnId: string; // "cmt:<playId>" or "seq:<n>" — idempotent across the sliding window
+  sequence: number;
+  type: string | null; // ESPN play type when present (foul/shot-on-target/goal/…)
+  text: string;
+  minute: string | null;
+  clockValue: number; // seconds into the match, for ordering
+  period: number;
+  espnTeamId: string | null;
+}
+
+/**
+ * Keep EVERY human commentary line — the full minute-by-minute prose — for the news
+ * generator's fact structure. The timeline parsers above distil typed events and
+ * deliberately drop the English narration; this is the opposite: prose retained as-is,
+ * lightly structured (minute/team/type). Idempotent by `cmt:<playId>` (falls back to
+ * `seq:<n>` for play-less lines) so repeated polls of ESPN's sliding window accumulate
+ * into one complete, stable feed instead of overwriting it.
+ */
+export function parseCommentaryFeed(
+  commentary: EspnCommentaryEntry[],
+  teamIdByName: Map<string, string>,
+): EspnCommentaryLine[] {
+  const out: EspnCommentaryLine[] = [];
+  for (const c of commentary) {
+    const p = c.play;
+    const text = (c.text ?? p?.text ?? '').trim();
+    if (!text) continue;
+    const sequence = Number(c.sequence ?? 0) || 0;
+    out.push({
+      espnId: p?.id != null ? `cmt:${p.id}` : `seq:${sequence}`,
+      sequence,
+      type: p?.type?.type ?? null,
+      text,
+      minute: p?.clock?.displayValue ?? c.time?.displayValue ?? null,
+      clockValue: Math.round(Number(p?.clock?.value ?? c.time?.value ?? 0)) || 0,
+      period: Number(p?.period?.number ?? 1) || 1,
+      espnTeamId: teamIdByName.get((p?.team?.displayName ?? '').toLowerCase()) ?? null,
+    });
+  }
+  return out;
 }
 
 /**
@@ -598,6 +659,9 @@ export function parseMatchEvents(keyEvents: EspnKeyEvent[]): EspnMatchEvent[] {
       playerEspnId: parts[0]?.athlete?.id != null ? String(parts[0].athlete!.id) : null,
       relatedEspnId: parts[1]?.athlete?.id != null ? String(parts[1].athlete!.id) : null,
       text: e.text ?? null,
+      goalY: typeof e.goalPositionY === 'number' ? e.goalPositionY : null,
+      fieldX: typeof e.fieldPositionX === 'number' ? e.fieldPositionX : null,
+      fieldY: typeof e.fieldPositionY === 'number' ? e.fieldPositionY : null,
     });
   }
   return out;
@@ -732,6 +796,7 @@ export class EspnService {
   ): Promise<{
     teams: EspnLineupTeam[];
     events: EspnMatchEvent[];
+    commentary: EspnCommentaryLine[];
     stats: EspnTeamStats[];
     live: EspnLiveState | null;
     gameInfo: { attendance: number | null; referee: string | null };
@@ -804,6 +869,8 @@ export class EspnService {
       ...parseCommentaryVarEvents(data.commentary ?? [], teamIdByName),
       ...parseCommentaryActionEvents(data.commentary ?? [], teamIdByName),
     ];
+    // Full human prose (separate from the typed timeline) — for the news fact-pack.
+    const commentary = parseCommentaryFeed(data.commentary ?? [], teamIdByName);
     const stats = parseTeamStats(data.boxscore);
     const live: EspnLiveState | null = comp
       ? {
@@ -833,7 +900,7 @@ export class EspnService {
     const gameInfo = { attendance, referee };
 
     if (!teams.length && !events.length && !stats.length && !live) return null;
-    return { teams, events, stats, live, gameInfo };
+    return { teams, events, commentary, stats, live, gameInfo };
   }
 }
 
@@ -900,7 +967,7 @@ interface EspnSummary {
     }>;
   }>;
   keyEvents?: EspnKeyEvent[];
-  commentary?: Array<{ play?: EspnCommentaryPlay }>;
+  commentary?: EspnCommentaryEntry[];
   boxscore?: EspnBoxscore;
   header?: {
     competitions?: Array<{
@@ -935,6 +1002,9 @@ interface EspnKeyEvent {
   team?: { id?: string | number };
   shootout?: boolean;
   participants?: Array<{ athlete?: { id?: string; displayName?: string } }>;
+  goalPositionY?: number;
+  fieldPositionX?: number;
+  fieldPositionY?: number;
 }
 interface EspnScoreboard {
   events?: Array<{
