@@ -25,7 +25,7 @@ const MATCH_INCLUDE = {
       location: true,
       logoUrl: true,
       broadcasters: true,
-      competition: { select: { country: true, confederation: true } },
+      competition: { select: { name: true, urlSlug: true, country: true, confederation: true } },
     },
   },
   round: { select: { number: true, name: true } },

@@ -34,6 +34,8 @@ const TOURNAMENT_SELECT = {
   name: true,
   logoUrl: true,
   status: true,
+  // Nome/slug da COMPETIÇÃO — o front linka o hub por /futebol/campeonato/:urlSlug.
+  competition: { select: { name: true, urlSlug: true } },
 } satisfies Prisma.SeasonSelect;
 
 @Injectable()
@@ -46,17 +48,9 @@ export class PoolsService {
   // ─────────────────────────────────────────────── Pool lifecycle
 
   async create(userId: string, dto: CreatePoolDto): Promise<PoolDetail> {
-    const tournament = await this.prisma.season.findUnique({
-      where: { id: dto.seasonId },
-      select: { id: true },
-    });
-    if (!tournament) {
-      throw new NotFoundException({
-        code: 'NOT_FOUND',
-        message: 'Torneio não encontrado.',
-      });
-    }
-
+    // O bolão nasce VAZIO (sem temporada). O dono cria a 1ª temporada pelo CTA
+    // da Visão geral, escolhendo o torneio e o nome — é a temporada que define
+    // o torneio (um mesmo bolão pode percorrer torneios).
     const pool = await this.prisma.pool.create({
       data: {
         name: dto.name,
@@ -65,16 +59,6 @@ export class PoolsService {
         ownerId: userId,
         visibility: dto.visibility ?? 'PRIVATE',
         members: { create: { userId, role: 'OWNER' } },
-        // The pool always opens with its first temporada (DRAFT until started,
-        // or ACTIVE right away when the owner ticks "iniciar já").
-        runs: {
-          create: {
-            seasonId: dto.seasonId,
-            label: 'Temporada 1',
-            order: 1,
-            ...(dto.start && { status: 'ACTIVE', startAt: new Date() }),
-          },
-        },
       },
       select: { id: true },
     });
@@ -96,24 +80,22 @@ export class PoolsService {
       orderBy: { joinedAt: 'desc' },
     });
 
-    return memberships
-      .map((m): PoolSummary | null => {
-        const run = this.pickCurrentRun(m.pool.runs);
-        if (!run) return null;
-        return {
-          id: m.pool.id,
-          name: m.pool.name,
-          description: m.pool.description,
-          inviteDescription: m.pool.inviteDescription,
-          visibility: m.pool.visibility,
-          tournament: run.season,
-          currentRun: this.runView(run),
-          myRole: m.role,
-          memberCount: m.pool._count.members,
-          createdAt: m.pool.createdAt,
-        };
-      })
-      .filter((p): p is PoolSummary => p !== null);
+    return memberships.map((m): PoolSummary => {
+      // Bolão pode estar VAZIO (sem temporada) — tournament/currentRun = null.
+      const run = this.pickCurrentRun(m.pool.runs);
+      return {
+        id: m.pool.id,
+        name: m.pool.name,
+        description: m.pool.description,
+        inviteDescription: m.pool.inviteDescription,
+        visibility: m.pool.visibility,
+        tournament: run ? run.season : null,
+        currentRun: run ? this.runView(run) : null,
+        myRole: m.role,
+        memberCount: m.pool._count.members,
+        createdAt: m.pool.createdAt,
+      };
+    });
   }
 
   async detail(poolId: string, userId: string): Promise<PoolDetail> {
@@ -138,13 +120,8 @@ export class PoolsService {
         message: 'Bolão não encontrado.',
       });
     }
+    // Bolão pode estar VAZIO (sem temporada) — tournament/currentRun = null.
     const run = this.pickCurrentRun(pool.runs);
-    if (!run) {
-      throw new NotFoundException({
-        code: 'NOT_FOUND',
-        message: 'Bolão sem temporada.',
-      });
-    }
 
     const canManage = this.canManage(membership.role);
     const invites = canManage
@@ -160,8 +137,8 @@ export class PoolsService {
       description: pool.description,
       inviteDescription: pool.inviteDescription,
       visibility: pool.visibility,
-      tournament: run.season,
-      currentRun: this.runView(run),
+      tournament: run ? run.season : null,
+      currentRun: run ? this.runView(run) : null,
       myRole: membership.role,
       memberCount: pool._count.members,
       createdAt: pool.createdAt,
@@ -342,13 +319,8 @@ export class PoolsService {
         message: 'Link de convite inválido ou expirado.',
       });
     }
+    // O bolão pode ainda não ter temporada — o convite segue válido (tournament null).
     const run = this.pickCurrentRun(invite.pool.runs);
-    if (!run) {
-      throw new NotFoundException({
-        code: 'INVITE_INVALID',
-        message: 'Link de convite inválido ou expirado.',
-      });
-    }
     const already = await this.prisma.poolMember.findUnique({
       where: { poolId_userId: { poolId: invite.poolId, userId } },
       select: { id: true },
@@ -359,7 +331,7 @@ export class PoolsService {
       // The invite page shows the invite-facing text, not the internal one.
       description: invite.pool.inviteDescription,
       visibility: invite.pool.visibility,
-      tournament: run.season,
+      tournament: run ? run.season : null,
       memberCount: invite.pool._count.members,
       alreadyMember: !!already,
     };
@@ -480,15 +452,9 @@ export class PoolsService {
     const run = runId
       ? await this.findRun(poolId, runId)
       : await this.currentRun(poolId);
-    if (!run) {
-      throw new NotFoundException({
-        code: 'NOT_FOUND',
-        message: 'Bolão sem temporada.',
-      });
-    }
     const memberIds = await this.memberUserIds(poolId);
-    // Not started yet → everyone at zero.
-    if (run.status === 'DRAFT' || !run.startAt) {
+    // Sem temporada (bolão vazio) ou ainda não iniciada → todos zerados.
+    if (!run || run.status === 'DRAFT' || !run.startAt) {
       return this.rankings.zeroRanking(memberIds, userId);
     }
     return this.rankings.tournamentRanking(run.seasonId, userId, memberIds, {
@@ -505,6 +471,7 @@ export class PoolsService {
     userId: string,
     dto: CreateRunDto,
   ): Promise<PoolDetail> {
+    // Criar/encerrar/iniciar temporada é do DONO ou ADMIN (membro comum não pode).
     await this.requireManage(poolId, userId);
     const open = await this.prisma.poolRun.findFirst({
       where: { poolId, endAt: null },

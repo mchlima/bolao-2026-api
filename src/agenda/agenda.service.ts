@@ -9,6 +9,8 @@ const AGENDA_INCLUDE = {
   homeTeam: true,
   awayTeam: true,
   stadium: true,
+  // Rodada (número/nome) p/ o card mostrar "Rodada X" junto do grupo (groupName é escalar).
+  round: { select: { number: true, name: true } },
   season: {
     select: {
       id: true,

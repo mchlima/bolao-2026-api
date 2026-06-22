@@ -18,6 +18,7 @@ export interface MyStandingsTournament {
   slug: string | null;
   name: string;
   status: SeasonStatus;
+  competition: { name: string; urlSlug: string | null } | null;
   general: MyStanding;
   pools: MyPoolStanding[];
 }

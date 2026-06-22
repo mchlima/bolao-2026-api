@@ -1,6 +1,5 @@
 import { PoolVisibility } from '@prisma/client';
 import {
-  IsBoolean,
   IsEnum,
   IsOptional,
   IsString,
@@ -26,18 +25,8 @@ export class CreatePoolDto {
   @MaxLength(500)
   inviteDescription?: string;
 
-  // The season the first temporada (run) disputes.
-  @IsString()
-  seasonId!: string;
-
   // MVP only uses PRIVATE; accepted for forward-compatibility.
   @IsOptional()
   @IsEnum(PoolVisibility)
   visibility?: PoolVisibility;
-
-  // Start the first temporada right away instead of leaving it as DRAFT (the
-  // owner can otherwise gather members first, then press "Iniciar").
-  @IsOptional()
-  @IsBoolean()
-  start?: boolean;
 }

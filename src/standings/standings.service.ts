@@ -14,6 +14,8 @@ const TOURNAMENT_SELECT = {
   name: true,
   logoUrl: true,
   status: true,
+  // Competição-dona — o slider linka o hub por /futebol/campeonato/:urlSlug.
+  competition: { select: { name: true, urlSlug: true } },
 } satisfies Prisma.SeasonSelect;
 
 // Slider order: live tournaments first, then upcoming, finished, drafts last.
@@ -93,7 +95,13 @@ export class StandingsService {
   }
 
   private async buildTournament(
-    season: { id: string; slug: string | null; name: string; status: SeasonStatus },
+    season: {
+      id: string;
+      slug: string | null;
+      name: string;
+      status: SeasonStatus;
+      competition: { name: string; urlSlug: string | null };
+    },
     pools: PoolEntry[],
     userId: string,
   ): Promise<MyStandingsTournament> {
@@ -110,6 +118,7 @@ export class StandingsService {
       slug: season.slug,
       name: season.name,
       status: season.status,
+      competition: season.competition ?? null,
       general,
       pools: poolStandings,
     };
@@ -143,7 +152,14 @@ export class StandingsService {
 }
 
 type PoolRunWithSeason = PoolRun & {
-  season: { id: string; slug: string | null; name: string; logoUrl: string | null; status: SeasonStatus };
+  season: {
+    id: string;
+    slug: string | null;
+    name: string;
+    logoUrl: string | null;
+    status: SeasonStatus;
+    competition: { name: string; urlSlug: string | null };
+  };
 };
 interface PoolEntry {
   poolId: string;

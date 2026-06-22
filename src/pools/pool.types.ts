@@ -6,6 +6,8 @@ export interface TournamentSummary {
   name: string;
   logoUrl: string | null;
   status: string;
+  // Competição-dona (p/ o front linkar o hub por /futebol/campeonato/:urlSlug).
+  competition?: { name: string; urlSlug: string | null } | null;
 }
 
 /** A pool's "temporada" — the season it disputes within a time window. */
@@ -46,7 +48,7 @@ export interface PoolSummary {
   description: string | null; // internal (members)
   inviteDescription: string | null; // shown on the invite page
   visibility: PoolVisibility;
-  tournament: TournamentSummary; // the current temporada's season
+  tournament: TournamentSummary | null; // a temporada atual define o torneio; null se o bolão ainda não tem temporada
   currentRun: PoolRunView | null; // the open (or latest) temporada
   myRole: PoolMemberRole;
   memberCount: number;
@@ -65,7 +67,7 @@ export interface JoinPreview {
   name: string;
   description: string | null;
   visibility: PoolVisibility;
-  tournament: TournamentSummary;
+  tournament: TournamentSummary | null; // null se o bolão ainda não tem temporada
   memberCount: number;
   alreadyMember: boolean;
 }
