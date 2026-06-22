@@ -53,6 +53,12 @@ export class AdminMatchesController {
     return this.matches.listNotes(id);
   }
 
+  // Narração humana da ESPN ingerida (read-only) — pro admin inspecionar/aproveitar.
+  @Get(':id/commentary')
+  listCommentary(@Param('id') id: string) {
+    return this.matches.listCommentary(id);
+  }
+
   @Post(':id/notes')
   addNote(
     @Param('id') id: string,

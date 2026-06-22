@@ -200,6 +200,31 @@ export class MatchesService {
     return this.prisma.matchNote.findMany({ where: { matchId }, orderBy: { createdAt: 'asc' } });
   }
 
+  /** Narração HUMANA da ESPN ingerida (MatchCommentary), pro admin inspecionar e
+   * aproveitar como matéria-prima. Em ordem cronológica; resolve o lado (home/away). */
+  async listCommentary(matchId: string): Promise<
+    Array<{ id: string; minute: string | null; period: number; type: string | null; side: 'home' | 'away' | null; text: string }>
+  > {
+    const match = await this.prisma.match.findUnique({
+      where: { id: matchId },
+      select: { homeTeamId: true, awayTeamId: true },
+    });
+    if (!match) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Partida não encontrada.' });
+    const rows = await this.prisma.matchCommentary.findMany({
+      where: { matchId },
+      orderBy: [{ clockValue: 'asc' }, { sequence: 'asc' }],
+      select: { id: true, minute: true, period: true, type: true, teamId: true, text: true },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      minute: r.minute,
+      period: r.period,
+      type: r.type,
+      side: r.teamId === match.homeTeamId ? 'home' : r.teamId === match.awayTeamId ? 'away' : null,
+      text: r.text,
+    }));
+  }
+
   async addNote(matchId: string, text: string, minute: string | null, authorId: string): Promise<MatchNote> {
     const exists = await this.prisma.match.findUnique({ where: { id: matchId }, select: { id: true } });
     if (!exists) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Partida não encontrada.' });
