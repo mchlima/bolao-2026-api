@@ -30,6 +30,7 @@ export interface NewsCard {
   category: TermRef | null;
   tags: TermRef[];
   imageAlt: string;
+  coverUrl: string | null;
   publishedAt: string;
   updatedAt: string;
   source: string | null;
@@ -74,6 +75,7 @@ type CardRow = {
   title: string;
   dek: string | null;
   seo: Prisma.JsonValue | null;
+  coverUrl: string | null;
   publishedAt: Date | null;
   updatedAt: Date;
   createdAt: Date;
@@ -83,7 +85,7 @@ type CardRow = {
 };
 
 const CARD_SELECT = {
-  slug: true, title: true, dek: true, seo: true,
+  slug: true, title: true, dek: true, seo: true, coverUrl: true,
   publishedAt: true, updatedAt: true, createdAt: true,
   category: { select: { name: true, slug: true } },
   tags: { select: { name: true, slug: true }, orderBy: { name: 'asc' as const } },
@@ -113,6 +115,7 @@ export class PublicNewsService {
       category,
       tags,
       imageAlt: seo.imageAlt ?? '',
+      coverUrl: it.coverUrl ?? null,
       publishedAt: (it.publishedAt ?? it.createdAt).toISOString(),
       updatedAt: it.updatedAt.toISOString(),
       source: it.sourceItem?.feed?.name ?? null,
@@ -139,7 +142,8 @@ export class PublicNewsService {
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.post.findMany({
         where,
-        orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+        // Destaque manual primeiro (manchete), depois cronológico.
+        orderBy: [{ featured: 'desc' }, { publishedAt: 'desc' }, { createdAt: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
         select: CARD_SELECT,

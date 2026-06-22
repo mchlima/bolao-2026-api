@@ -6,6 +6,7 @@ import { slugify } from './slug.util';
 import { TagsService } from './tags.service';
 import { CategoriesService } from './categories.service';
 import { IndexNowService } from './indexnow.service';
+import { CoverImageService } from './cover-image.service';
 import { CreatePostDto, ListPostsQueryDto, UpdatePostDto } from './dto/post.dto';
 
 /** Valores editáveis de um post (versão de trabalho). draft = este shape em JSON. */
@@ -31,6 +32,8 @@ export interface PostListRow {
   title: string;
   slug: string;
   status: string;
+  featured: boolean;
+  coverUrl: string | null;
   publishedAt: string | null;
   hasPendingChanges: boolean;
   category: { name: string; slug: string } | null;
@@ -44,6 +47,8 @@ export interface PostListRow {
 export interface PostView {
   id: string;
   status: string;
+  featured: boolean;
+  coverUrl: string | null;
   title: string;
   slug: string;
   dek: string | null;
@@ -90,6 +95,7 @@ export class PostsService {
     private readonly tags: TagsService,
     private readonly categories: CategoriesService,
     private readonly indexNow: IndexNowService,
+    private readonly cover: CoverImageService,
   ) {}
 
   /** Avisa o IndexNow (Bing/Yandex) que uma matéria entrou no ar. Fire-and-forget. */
@@ -153,6 +159,8 @@ export class PostsService {
     return {
       id: post.id,
       status: post.status,
+      featured: post.featured,
+      coverUrl: post.coverUrl,
       title: w.title,
       slug: w.slug,
       dek: w.dek,
@@ -193,6 +201,8 @@ export class PostsService {
         title: d?.title ?? p.title,
         slug: p.slug,
         status: p.status,
+        featured: p.featured,
+        coverUrl: p.coverUrl,
         publishedAt: p.publishedAt?.toISOString() ?? null,
         hasPendingChanges: p.draft != null,
         category: p.category,
@@ -328,6 +338,17 @@ export class PostsService {
     await this.prisma.post.delete({ where: { id } });
   }
 
+  /**
+   * Liga/desliga o destaque editorial. Escreve a COLUNA direto (não passa pelo overlay
+   * `draft`): destaque é colocação editorial, não conteúdo — vale na hora mesmo num
+   * post publicado. O destaque sobe o post pro topo do público (manchete/hero).
+   */
+  async setFeatured(id: string, featured: boolean): Promise<PostView> {
+    await this.findRow(id);
+    await this.prisma.post.update({ where: { id }, data: { featured } });
+    return this.getOne(id);
+  }
+
   // ───────────────────────────────────────────── promoção da esteira → CMS
 
   /**
@@ -373,7 +394,34 @@ export class PostsService {
         ...(tagIds.length ? { tags: { connect: tagIds.map((tid) => ({ id: tid })) } } : {}),
       },
     });
+    // Capa de jogo (best-effort): matéria com matchId ganha capa gerada (escudos+placar).
+    if (item.matchId) {
+      const coverUrl = await this.cover.forMatch(item.matchId);
+      if (coverUrl) {
+        await this.prisma.post.update({ where: { id: post.id }, data: { coverUrl } });
+        post.coverUrl = coverUrl;
+      }
+    }
     if (publish) this.pingPublished(slug);
     return post;
+  }
+
+  /** (Re)gera a capa de um post de jogo a partir do match vinculado (sourceItem.matchId). */
+  async setCover(id: string): Promise<PostView> {
+    const post = await this.prisma.post.findUnique({
+      where: { id },
+      select: { id: true, sourceItem: { select: { matchId: true } } },
+    });
+    if (!post) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Post não encontrado.' });
+    const matchId = post.sourceItem?.matchId ?? null;
+    if (!matchId) {
+      throw new BadRequestException({ code: 'NO_MATCH', message: 'Este post não está vinculado a um jogo.' });
+    }
+    const coverUrl = await this.cover.forMatch(matchId);
+    if (!coverUrl) {
+      throw new BadRequestException({ code: 'COVER_FAILED', message: 'Não foi possível gerar a capa (escudos ou storage indisponível).' });
+    }
+    await this.prisma.post.update({ where: { id }, data: { coverUrl } });
+    return this.getOne(id);
   }
 }

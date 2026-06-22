@@ -20,6 +20,7 @@ import { AdminPostsController } from './admin-posts.controller';
 import { PostsService } from './posts.service';
 import { AdminMatchReportController } from './admin-match-report.controller';
 import { MatchReportService } from './match-report.service';
+import { CoverImageService } from './cover-image.service';
 import { IndexNowService } from './indexnow.service';
 import { AdminContentSettingsController } from './admin-content-settings.controller';
 import { AdminContentDashboardController } from './admin-content-dashboard.controller';
@@ -68,6 +69,7 @@ import { ContentSettingsService } from './content-settings.service';
     NewsItemsService,
     PostsService,
     MatchReportService,
+    CoverImageService,
     IndexNowService,
   ],
   exports: [LlmService, ContentIngestService, ContentProcessService],

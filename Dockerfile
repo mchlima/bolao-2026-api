@@ -21,8 +21,9 @@ RUN npm prune --omit=dev
 FROM node:22-slim AS runtime
 # openssl: Prisma. postgresql-client-17: the daily BackupService runs pg_dump,
 # which must match the v17 server — Debian's default client is v15, so pull v17
-# from the PostgreSQL APT repo (PGDG).
-RUN apt-get update -y && apt-get install -y openssl curl ca-certificates \
+# from the PostgreSQL APT repo (PGDG). fontconfig + fonts-liberation: server-side
+# match-cover rendering (sharp/librsvg) needs a font installed to draw the text.
+RUN apt-get update -y && apt-get install -y openssl curl ca-certificates fontconfig fonts-liberation \
   && install -d /usr/share/postgresql-common/pgdg \
   && curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
        https://www.postgresql.org/media/keys/ACCC4CF8.asc \

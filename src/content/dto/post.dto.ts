@@ -1,6 +1,7 @@
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsObject,
   IsOptional,
@@ -36,6 +37,11 @@ export class PostSeoDto {
   @ValidateNested({ each: true })
   @Type(() => PostFaqEntryDto)
   faq?: PostFaqEntryDto[];
+}
+
+/** Liga/desliga o destaque editorial (manchete). Escreve a coluna direto — fora do overlay draft. */
+export class ToggleFeaturedDto {
+  @IsBoolean() featured!: boolean;
 }
 
 export class ListPostsQueryDto extends PaginationQueryDto {

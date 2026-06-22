@@ -18,7 +18,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Paginated } from '../common/pagination';
 import type { SafeUser } from '../users/user.types';
 import { PostListRow, PostsService, PostView } from './posts.service';
-import { CreatePostDto, ListPostsQueryDto, UpdatePostDto } from './dto/post.dto';
+import { CreatePostDto, ListPostsQueryDto, ToggleFeaturedDto, UpdatePostDto } from './dto/post.dto';
 
 @Controller('admin/posts')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -54,6 +54,18 @@ export class AdminPostsController {
   @Post(':id/archive')
   archive(@Param('id') id: string): Promise<PostView> {
     return this.posts.archive(id);
+  }
+
+  /** Liga/desliga o destaque editorial (manchete da home + topo de /noticias). */
+  @Patch(':id/featured')
+  setFeatured(@Param('id') id: string, @Body() dto: ToggleFeaturedDto): Promise<PostView> {
+    return this.posts.setFeatured(id, dto.featured);
+  }
+
+  /** (Re)gera a capa do post a partir do jogo vinculado (escudos + placar). */
+  @Post(':id/cover')
+  setCover(@Param('id') id: string): Promise<PostView> {
+    return this.posts.setCover(id);
   }
 
   @Post(':id/discard-draft')

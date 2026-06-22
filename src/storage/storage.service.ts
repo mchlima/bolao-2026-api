@@ -68,6 +68,36 @@ export class StorageService {
   }
 
   /**
+   * Upload an ALREADY-ENCODED image buffer as-is (no resize/re-encode), returning
+   * the public URL. Use for images we render at a specific size (e.g. match covers
+   * in 1200×630) where the square 512 optimization of uploadImage() doesn't fit.
+   */
+  async uploadRaw(
+    buffer: Buffer,
+    prefix: string,
+    contentType = 'image/webp',
+    ext = 'webp',
+  ): Promise<string> {
+    if (!this.client) {
+      throw new ServiceUnavailableException({
+        code: 'STORAGE_NOT_CONFIGURED',
+        message: 'Storage de imagens não configurado (defina STORAGE_* no .env).',
+      });
+    }
+    const key = `${prefix}/${randomUUID()}.${ext}`;
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Body: buffer,
+        ContentType: contentType,
+        CacheControl: 'public, max-age=31536000, immutable',
+      }),
+    );
+    return `${this.publicBaseUrl}/${key}`;
+  }
+
+  /**
    * Best-effort removal of a previously-uploaded object, given its public URL.
    * Only deletes objects we own (URL under our public base); never throws — a
    * dangling object is acceptable, but failing the request over cleanup is not.

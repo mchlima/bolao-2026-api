@@ -1075,6 +1075,8 @@ model Post {
   body         String // corpo do texto (sem a manchete)
   seo          Json? // pacote SEO/GEO do artigo: metaTitle/metaDescription/focusKeyword/keywords/keyTakeaways/faq/imageAlt
   status       String    @default("DRAFT")
+  featured     Boolean   @default(false) // destaque manual: vira a manchete (hero) na home e em /noticias
+  coverUrl     String? // capa gerada (escudos+placar) p/ matérias de jogo; null = sem capa (cai no tipográfico)
   publishedAt  DateTime? // 1ª publicação (define a ordem no público); null enquanto rascunho
   draft        Json? // overlay de edições pendentes (title/slug/dek/body/seo/categoryId/tagIds); null = sem alterações não publicadas
   categoryId   String? // categoria da versão publicada
@@ -1088,6 +1090,7 @@ model Post {
   sourceItem NewsItem? @relation(fields: [sourceItemId], references: [id], onDelete: SetNull)
 
   @@index([status, publishedAt])
+  @@index([featured, publishedAt])
   @@index([categoryId])
   @@map("posts")
 }
