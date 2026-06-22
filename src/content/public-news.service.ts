@@ -31,6 +31,7 @@ export interface NewsCard {
   tags: TermRef[];
   imageAlt: string;
   publishedAt: string;
+  updatedAt: string;
   source: string | null;
 }
 
@@ -74,6 +75,7 @@ type CardRow = {
   dek: string | null;
   seo: Prisma.JsonValue | null;
   publishedAt: Date | null;
+  updatedAt: Date;
   createdAt: Date;
   category: { name: string; slug: string } | null;
   tags?: { name: string; slug: string }[];
@@ -82,7 +84,7 @@ type CardRow = {
 
 const CARD_SELECT = {
   slug: true, title: true, dek: true, seo: true,
-  publishedAt: true, createdAt: true,
+  publishedAt: true, updatedAt: true, createdAt: true,
   category: { select: { name: true, slug: true } },
   tags: { select: { name: true, slug: true }, orderBy: { name: 'asc' as const } },
   sourceItem: { select: { feed: { select: { name: true } } } },
@@ -112,6 +114,7 @@ export class PublicNewsService {
       tags,
       imageAlt: seo.imageAlt ?? '',
       publishedAt: (it.publishedAt ?? it.createdAt).toISOString(),
+      updatedAt: it.updatedAt.toISOString(),
       source: it.sourceItem?.feed?.name ?? null,
     };
   }

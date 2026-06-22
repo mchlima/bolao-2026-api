@@ -20,6 +20,7 @@ import { AdminPostsController } from './admin-posts.controller';
 import { PostsService } from './posts.service';
 import { AdminMatchReportController } from './admin-match-report.controller';
 import { MatchReportService } from './match-report.service';
+import { IndexNowService } from './indexnow.service';
 import { AdminContentSettingsController } from './admin-content-settings.controller';
 import { AdminContentDashboardController } from './admin-content-dashboard.controller';
 import { PublicNewsController, PublicTaxonomyController } from './public-news.controller';
@@ -67,6 +68,7 @@ import { ContentSettingsService } from './content-settings.service';
     NewsItemsService,
     PostsService,
     MatchReportService,
+    IndexNowService,
   ],
   exports: [LlmService, ContentIngestService, ContentProcessService],
 })

@@ -5,6 +5,7 @@ import { Paginated, paginated } from '../common/pagination';
 import { slugify } from './slug.util';
 import { TagsService } from './tags.service';
 import { CategoriesService } from './categories.service';
+import { IndexNowService } from './indexnow.service';
 import { CreatePostDto, ListPostsQueryDto, UpdatePostDto } from './dto/post.dto';
 
 /** Valores editáveis de um post (versão de trabalho). draft = este shape em JSON. */
@@ -88,7 +89,13 @@ export class PostsService {
     private readonly prisma: PrismaService,
     private readonly tags: TagsService,
     private readonly categories: CategoriesService,
+    private readonly indexNow: IndexNowService,
   ) {}
+
+  /** Avisa o IndexNow (Bing/Yandex) que uma matéria entrou no ar. Fire-and-forget. */
+  private pingPublished(slug: string): void {
+    void this.indexNow.submit([`/noticias/${slug}`, '/noticias']);
+  }
 
   // ───────────────────────────────────────────────────────── helpers
 
@@ -295,6 +302,7 @@ export class PostsService {
         authorId: post.authorId ?? adminId,
       },
     });
+    this.pingPublished(slug);
     return this.getOne(id);
   }
 
@@ -350,7 +358,7 @@ export class PostsService {
     }
     const slugBase = (typeof seo.slug === 'string' && seo.slug) || title || item.sourceTitle;
     const slug = await this.uniqueSlug(slugBase, null);
-    return this.prisma.post.create({
+    const post = await this.prisma.post.create({
       data: {
         title: title || item.sourceTitle,
         slug,
@@ -365,5 +373,7 @@ export class PostsService {
         ...(tagIds.length ? { tags: { connect: tagIds.map((tid) => ({ id: tid })) } } : {}),
       },
     });
+    if (publish) this.pingPublished(slug);
+    return post;
   }
 }
