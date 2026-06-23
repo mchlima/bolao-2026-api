@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { StandingsService } from './standings.service';
 import { StandingsTeam } from './standings.types';
 import { WC2026_THIRDS_TABLE } from './data/wc2026-thirds-table';
+import { ensureMatchSlug } from '../matches/match-slug.util';
 
 // A tie's projected occupants (provisional): the teams that WOULD fill the slots
 // given the current standings / live results. Only the parts not yet officially
@@ -459,6 +460,12 @@ export class SlotResolverService {
       if (wantAway && !leg.awayTeamId) patch.awayTeamId = wantAway;
       if (Object.keys(patch).length) {
         await this.prisma.match.update({ where: { id: leg.id }, data: patch });
+        // Times do mata-mata acabaram de resolver → gera/atualiza o slug de SEO.
+        try {
+          await ensureMatchSlug(this.prisma, leg.id);
+        } catch {
+          // slug é best-effort — não atrapalha a resolução do chaveamento
+        }
         changed = true;
       }
     }

@@ -183,8 +183,9 @@ export class RankingsService {
     // When given, the ranking is scoped to these members (a pool/"bolão").
     memberUserIds?: string[],
   ): Promise<MatchRankingResponse> {
-    const match = await this.prisma.match.findUnique({
-      where: { id: matchId },
+    // matchId pode vir como id (cuid) ou slug de SEO — a página de jogo usa a URL bonita.
+    const match = await this.prisma.match.findFirst({
+      where: { OR: [{ id: matchId }, { slug: matchId }] },
       select: {
         id: true,
         seasonId: true,
@@ -214,7 +215,7 @@ export class RankingsService {
 
     const predictions = await this.prisma.prediction.findMany({
       where: {
-        matchId,
+        matchId: match.id,
         ...(memberUserIds && { userId: { in: memberUserIds } }),
       },
       select: {

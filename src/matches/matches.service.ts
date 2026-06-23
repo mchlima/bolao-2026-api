@@ -8,6 +8,7 @@ import { CreateMatchDto } from './dto/create-match.dto';
 import { QueryMatchesDto } from './dto/query-matches.dto';
 import { UpdateMatchDto } from './dto/update-match.dto';
 import { SlotResolverService } from '../structure/slot-resolver.service';
+import { ensureMatchSlug } from './match-slug.util';
 
 // Relations returned with every match (teams carry flag/logo data for the UI).
 const MATCH_INCLUDE = {
@@ -88,9 +89,11 @@ export class MatchesService {
     return paginated(data, total, page, pageSize);
   }
 
-  async findOne(id: string): Promise<MatchDetailWithTeams> {
-    const match = await this.prisma.match.findUnique({
-      where: { id },
+  async findOne(idOrSlug: string): Promise<MatchDetailWithTeams> {
+    // Aceita id (cuid) OU slug de SEO ("brasil-x-franca-2026-06-22") — a página de jogo
+    // resolve pela URL bonita; links/redirects antigos por id continuam funcionando.
+    const match = await this.prisma.match.findFirst({
+      where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
       include: MATCH_DETAIL_INCLUDE,
       relationLoadStrategy: 'join',
     });
@@ -123,7 +126,13 @@ export class MatchesService {
       });
       data.matchNumber = (_max.matchNumber ?? 0) + 1;
     }
-    return this.prisma.match.create({ data, include: MATCH_INCLUDE });
+    const created = await this.prisma.match.create({ data, include: MATCH_INCLUDE });
+    try {
+      await ensureMatchSlug(this.prisma, created.id);
+    } catch {
+      // slug é best-effort (SEO) — nunca falha a criação do jogo
+    }
+    return this.prisma.match.findUniqueOrThrow({ where: { id: created.id }, include: MATCH_INCLUDE });
   }
 
   async update(
@@ -137,6 +146,15 @@ export class MatchesService {
       data: dto,
       include: MATCH_INCLUDE,
     });
+
+    // Times/data podem ter mudado → recalcula o slug de SEO (best-effort).
+    if (dto.homeTeamId !== undefined || dto.awayTeamId !== undefined || dto.kickoffAt !== undefined) {
+      try {
+        await ensureMatchSlug(this.prisma, id);
+      } catch {
+        // slug é best-effort — nunca falha o update do jogo
+      }
+    }
 
     // Audit sensitive live-control changes (status / score) when an actor is known.
     if (actorUserId) {

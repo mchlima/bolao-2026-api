@@ -694,6 +694,9 @@ model Stadium {
 
 model Match {
   id              String         @id @default(cuid())
+  // URL slug p/ SEO (ex.: "brasil-x-franca-2026-06-22") — derivado de times+data,
+  // único; null enquanto os times do mata-mata não resolveram. Ver match-slug.util.
+  slug            String?        @unique
   seasonId        String
   // Structure links (all nullable — a match always has a season, structure is filled in by admin/seed).
   stageId         String?

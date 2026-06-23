@@ -394,14 +394,8 @@ export class PostsService {
         ...(tagIds.length ? { tags: { connect: tagIds.map((tid) => ({ id: tid })) } } : {}),
       },
     });
-    // Capa de jogo (best-effort): matéria com matchId ganha capa gerada (escudos+placar).
-    if (item.matchId) {
-      const coverUrl = await this.cover.forMatch(item.matchId);
-      if (coverUrl) {
-        await this.prisma.post.update({ where: { id: post.id }, data: { coverUrl } });
-        post.coverUrl = coverUrl;
-      }
-    }
+    // Capa NÃO é gerada automaticamente (a capa programática de escudos+placar ficava feia).
+    // Capas são tratadas caso a caso pelo admin via POST /admin/posts/:id/cover (this.setCover).
     if (publish) this.pingPublished(slug);
     return post;
   }
