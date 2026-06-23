@@ -732,6 +732,15 @@ model Match {
   // Tactical formation per side (e.g. "4-3-3"), captured from the ESPN summary.
   homeFormation   String?
   awayFormation   String?
+  // Pre-match win probability (1X2), derived from ESPN scoreboard betting odds
+  // (moneyline → implied %, de-vigged so home+draw+away = 1). Powers the match
+  // preview "favorito/probabilidade" block. Null until odds are published (~days
+  // out) and ingested by OddsService; cleared/ignored once the match starts.
+  oddsHomePct     Float?
+  oddsDrawPct     Float?
+  oddsAwayPct     Float?
+  oddsProvider    String? // sportsbook name (e.g. "DraftKings"), for attribution
+  oddsUpdatedAt   DateTime?
   // Live match clock from ESPN (e.g. "67'"), set while LIVE, cleared on finish.
   liveClock       String?
   // Quando o jogo FINALIZOU de fato (apito), setado uma vez no flip pra FINISHED.

@@ -7,6 +7,7 @@ import {
   PreviewForm,
   PreviewFormMatch,
   PreviewH2H,
+  PreviewProbability,
   PreviewScorer,
   PreviewScorers,
   PreviewStandingRow,
@@ -52,6 +53,11 @@ export class MatchPreviewService {
         homeTeam: { select: TEAM_REF_SELECT },
         awayTeam: { select: TEAM_REF_SELECT },
         season: { select: { name: true, competition: { select: { name: true } } } },
+        oddsHomePct: true,
+        oddsDrawPct: true,
+        oddsAwayPct: true,
+        oddsProvider: true,
+        oddsUpdatedAt: true,
       },
     });
     if (!match) {
@@ -66,6 +72,7 @@ export class MatchPreviewService {
       h2h: null,
       standings: null,
       scorers: null,
+      probability: buildProbability(match),
     };
 
     // Sem os dois times resolvidos (slot de mata-mata "a definir") não há prévia.
@@ -84,13 +91,25 @@ export class MatchPreviewService {
       this.buildScorers(match.seasonId, homeId, awayId, competition).catch(() => null),
     ]);
 
+    const probability = buildProbability(match);
+
     const available =
+      !!probability ||
       !!(form && (form.home.matches.length || form.away.matches.length)) ||
       !!(h2h && h2h.total) ||
       !!(standings && (standings.home || standings.away)) ||
       !!(scorers && (scorers.home.length || scorers.away.length));
 
-    return { available, home: match.homeTeam, away: match.awayTeam, form, h2h, standings, scorers };
+    return {
+      available,
+      home: match.homeTeam,
+      away: match.awayTeam,
+      form,
+      h2h,
+      standings,
+      scorers,
+      probability,
+    };
   }
 
   // ── Forma recente ──────────────────────────────────────────────────────────
@@ -306,4 +325,27 @@ function oppositeOf(pastHomeTeamId: string | null, homeId: string, awayId: strin
   if (pastHomeTeamId === homeId) return awayId;
   if (pastHomeTeamId === awayId) return homeId;
   return null;
+}
+
+/** Monta o bloco de probabilidade a partir das colunas odds* (gravadas pelo
+ *  OddsService). null quando o jogo ainda não tem odds. O favorito é o maior %. */
+function buildProbability(m: {
+  oddsHomePct: number | null;
+  oddsDrawPct: number | null;
+  oddsAwayPct: number | null;
+  oddsProvider: string | null;
+  oddsUpdatedAt: Date | null;
+}): PreviewProbability | null {
+  const { oddsHomePct: home, oddsDrawPct: draw, oddsAwayPct: away } = m;
+  if (home == null || draw == null || away == null) return null;
+  const favorite: 'home' | 'draw' | 'away' =
+    home >= draw && home >= away ? 'home' : away >= draw ? 'away' : 'draw';
+  return {
+    provider: m.oddsProvider,
+    home,
+    draw,
+    away,
+    favorite,
+    updatedAt: m.oddsUpdatedAt ? m.oddsUpdatedAt.toISOString() : null,
+  };
 }

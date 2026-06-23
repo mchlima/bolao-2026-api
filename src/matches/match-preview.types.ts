@@ -80,6 +80,16 @@ export interface PreviewScorers {
   away: PreviewScorer[];
 }
 
+/** Probabilidade 1X2 do mercado (odds da ESPN, de-vigadas). Percentuais 0–100. */
+export interface PreviewProbability {
+  provider: string | null; // casa de apostas (atribuição)
+  home: number;
+  draw: number;
+  away: number;
+  favorite: 'home' | 'draw' | 'away';
+  updatedAt: string | null;
+}
+
 export interface MatchPreview {
   // true quando há confronto de verdade E pelo menos um bloco com dado.
   available: boolean;
@@ -89,4 +99,5 @@ export interface MatchPreview {
   h2h: PreviewH2H | null;
   standings: PreviewStandings | null;
   scorers: PreviewScorers | null;
+  probability: PreviewProbability | null;
 }

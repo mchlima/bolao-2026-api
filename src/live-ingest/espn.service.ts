@@ -17,6 +17,18 @@ export interface EspnEvent {
   /** FIFA fair-play points (≤ 0) keyed by team abbreviation — the disciplinary
    * tiebreak input, computed per-player from the event's card sequence. */
   fairPlay: Record<string, number>;
+  /** Pre-match 1X2 win probability from the scoreboard betting odds, de-vigged.
+   * null when the book hasn't priced the game yet. See parseScoreboardOdds. */
+  odds: EspnOdds | null;
+}
+
+/** Implied win probability (0–1, de-vigged so home+away+draw ≈ 1) from a
+ * sportsbook's moneyline. Team sides are keyed by ESPN abbreviation (same key as
+ * `scores`) so the caller maps to OUR home/away regardless of feed orientation. */
+export interface EspnOdds {
+  provider: string;
+  byAbbr: Record<string, number>;
+  draw: number;
 }
 
 /**
@@ -30,6 +42,51 @@ export interface EspnEvent {
 export function playerFairPlay(yellows: number, reds: number): number {
   if (reds === 0) return yellows >= 2 ? -3 : yellows === 1 ? -1 : 0;
   return yellows >= 1 ? -3 : -4;
+}
+
+/** American moneyline ("-700", "+750", 1800) → decimal odds. null if unparsable. */
+function americanToDecimal(raw: string | number | null | undefined): number | null {
+  if (raw == null) return null;
+  const n = typeof raw === 'number' ? raw : Number.parseInt(String(raw).replace('+', ''), 10);
+  if (!Number.isFinite(n) || n === 0) return null;
+  return n < 0 ? 1 + 100 / -n : 1 + n / 100;
+}
+
+/**
+ * Build de-vigged 1X2 win probabilities from a scoreboard competition's betting
+ * odds. ESPN's `odds[0].moneyline.{home,away,draw}` carries American prices
+ * (close preferred, open as fallback); we convert to implied probabilities and
+ * normalize out the bookmaker margin so home+away+draw = 1. Sides are keyed by
+ * ESPN abbreviation (via the home/away competitors) so the caller maps to our
+ * teams by code. Returns null unless all three prices parse.
+ */
+function parseScoreboardOdds(
+  comp: {
+    odds?: Array<{
+      provider?: { name?: string };
+      moneyline?: { home?: EspnMoneylineSide; away?: EspnMoneylineSide; draw?: EspnMoneylineSide };
+    }>;
+  },
+  homeAbbr: string | undefined,
+  awayAbbr: string | undefined,
+): EspnOdds | null {
+  const o = comp.odds?.[0];
+  const ml = o?.moneyline;
+  if (!ml || !homeAbbr || !awayAbbr) return null;
+  const decH = americanToDecimal(ml.home?.close?.odds ?? ml.home?.open?.odds);
+  const decA = americanToDecimal(ml.away?.close?.odds ?? ml.away?.open?.odds);
+  const decD = americanToDecimal(ml.draw?.close?.odds ?? ml.draw?.open?.odds);
+  if (!decH || !decA || !decD) return null;
+  const iH = 1 / decH;
+  const iA = 1 / decA;
+  const iD = 1 / decD;
+  const sum = iH + iA + iD;
+  if (sum <= 0) return null;
+  return {
+    provider: o?.provider?.name ?? 'Mercado',
+    byAbbr: { [homeAbbr]: iH / sum, [awayAbbr]: iA / sum },
+    draw: iD / sum,
+  };
 }
 
 // ESPN encodes a roster player's sub status as { didSub: boolean } — an OBJECT,
@@ -761,11 +818,15 @@ export class EspnService {
       if (!comp) continue;
       const scores: Record<string, number> = {};
       const idToAbbr: Record<string, string> = {};
+      let homeAbbr: string | undefined;
+      let awayAbbr: string | undefined;
       for (const c of comp.competitors ?? []) {
         const abbr = c.team?.abbreviation;
         if (!abbr) continue;
         scores[abbr] = Number.parseInt(c.score ?? '0', 10) || 0;
         if (c.team?.id) idToAbbr[String(c.team.id)] = abbr;
+        if (c.homeAway === 'home') homeAbbr = abbr;
+        else if (c.homeAway === 'away') awayAbbr = abbr;
       }
       const { cards, fairPlay } = parseDiscipline(comp.details ?? [], idToAbbr);
       out.push({
@@ -778,6 +839,7 @@ export class EspnService {
         abbrs: Object.keys(scores),
         cards,
         fairPlay,
+        odds: parseScoreboardOdds(comp, homeAbbr, awayAbbr),
       });
     }
     return out;
@@ -1006,6 +1068,11 @@ interface EspnKeyEvent {
   fieldPositionX?: number;
   fieldPositionY?: number;
 }
+// One side of an ESPN moneyline market: open/close American prices as strings.
+interface EspnMoneylineSide {
+  open?: { odds?: string };
+  close?: { odds?: string };
+}
 interface EspnScoreboard {
   events?: Array<{
     id: string | number;
@@ -1014,9 +1081,14 @@ interface EspnScoreboard {
     competitions?: Array<{
       competitors?: Array<{
         score?: string;
+        homeAway?: string;
         team?: { id?: string | number; abbreviation?: string };
       }>;
       details?: EspnDetail[];
+      odds?: Array<{
+        provider?: { name?: string };
+        moneyline?: { home?: EspnMoneylineSide; away?: EspnMoneylineSide; draw?: EspnMoneylineSide };
+      }>;
     }>;
   }>;
 }
