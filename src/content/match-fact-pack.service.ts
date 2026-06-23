@@ -56,6 +56,11 @@ function dataPorExtenso(d: Date): string {
   }).format(d);
 }
 
+/** Data YYYY-MM-DD no fuso de Brasília (en-CA formata nesse padrão) — desambigua o slug do resumo. */
+function dataISO(d: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(d);
+}
+
 /**
  * Monta o "pacote de fatos" de uma partida encerrada a partir do NOSSO banco
  * (placar/gols/cartões/escalação/stats/lances + classificação derivada do grupo e
@@ -112,6 +117,7 @@ export class MatchFactPackService {
         grupo: match.group ? `Grupo ${match.group.name}` : null,
         rodada: match.round?.name ?? null,
         data: dataPorExtenso(match.kickoffAt),
+        dataISO: dataISO(match.kickoffAt),
         estadio: match.stadium?.name ?? null,
         cidade: match.stadium?.city ?? null,
         publico: match.attendance ?? null,

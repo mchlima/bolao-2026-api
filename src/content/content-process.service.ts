@@ -23,15 +23,21 @@ const DEDUP_WINDOW_MS = 48 * 3_600_000;
 const MIN_BODY_CHARS = 400;
 
 /**
- * Slug canônico de RESUMO DE JOGO, no padrão dos portais (ge.globo/ESPN): o placar é
- * keyword forte de busca de jogo encerrado ("mexico-1-x-0-coreia-do-sul"). sourceTitle
- * já vem como "Time A N x M Time B" (MatchFactPackService).
+ * Slug canônico de RESUMO DE JOGO, no padrão dos portais (ge.globo/ESPN): placar +
+ * competição (durável, sem ano) + data ISO no fim → "franca-3-x-0-iraque-copa-do-mundo-2026-06-22".
+ * O placar é keyword de jogo encerrado; a data desambigua entre edições e turno/returno (a
+ * unicidade fina ainda é resolvida na publicação). sourceTitle já vem "Time A N x M Time B".
  */
 function matchReportSlug(sourceTitle: string | null, facts: Record<string, unknown> | null): string | null {
   const title = (sourceTitle ?? '').trim();
   if (!title) return null;
-  const comp = (facts?.partida as { competicao?: unknown } | undefined)?.competicao;
-  const base = typeof comp === 'string' && comp.trim() ? `${title} ${comp.trim()}` : title;
+  const partida = facts?.partida as { competicao?: unknown; dataISO?: unknown } | undefined;
+  // Competição durável (sem ano). Se vier do fallback season.name (que tem ano), o
+  // ano final é removido — a data ISO já carrega o ano, não duplicamos.
+  const compRaw = typeof partida?.competicao === 'string' ? partida.competicao.trim() : '';
+  const comp = compRaw.replace(/\s+\d{4}$/, '');
+  const dateIso = typeof partida?.dataISO === 'string' ? partida.dataISO.trim() : '';
+  const base = [title, comp, dateIso].filter(Boolean).join(' ');
   return slugify(base) || null;
 }
 
