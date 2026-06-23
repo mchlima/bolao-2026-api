@@ -5,6 +5,8 @@ import { MatchesService, MatchWithRelations, MatchDetail } from './matches.servi
 import { LineupService, MatchLineup } from './lineup.service';
 import { TimelineService, MatchTimeline } from './timeline.service';
 import { StatsService, MatchStats } from './stats.service';
+import { MatchPreviewService } from './match-preview.service';
+import { MatchPreview } from './match-preview.types';
 
 @Controller('matches')
 export class MatchesController {
@@ -13,6 +15,7 @@ export class MatchesController {
     private readonly lineups: LineupService,
     private readonly timeline: TimelineService,
     private readonly stats: StatsService,
+    private readonly preview: MatchPreviewService,
   ) {}
 
   @Get()
@@ -43,5 +46,12 @@ export class MatchesController {
   @Get(':id/stats')
   statsFor(@Param('id') id: string): Promise<MatchStats> {
     return this.stats.forMatch(id);
+  }
+
+  // Prévia do jogo (forma/H2H/tabela/artilheiros), do nosso banco. O front busca
+  // só enquanto o jogo está agendado; aceita id ou slug como as demais rotas.
+  @Get(':id/preview')
+  previewFor(@Param('id') id: string): Promise<MatchPreview> {
+    return this.preview.forMatch(id);
   }
 }
