@@ -1,5 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { SeasonStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { CompetitionsService } from '../competitions/competitions.service';
 import { PhaseWeightService } from '../scoring/phase-weight.service';
 import { ScoreTier, ScoringService } from '../scoring/scoring.service';
 
@@ -7,8 +9,9 @@ export interface RankingEntry {
   rank: number;
   user: { id: string; name: string; avatarUrl: string | null };
   points: number;
-  exactCount: number; // tiebreak / info
-  scoredCount: number; // predictions that already counted (match had a result)
+  exactCount: number; // "cravadas" (exact scorelines) — 2nd tiebreak / info
+  scoredCount: number; // "pontuadas": predictions on a match that already counted
+  predictedCount: number; // "palpitadas": predictions made in this scope — last tiebreak
   // Match ranking only: the participant's predicted scoreline and earned tier.
   prediction?: { home: number; away: number };
   tier?: ScoreTier;
@@ -18,6 +21,25 @@ export interface RankingResponse {
   entries: RankingEntry[]; // top 100
   currentUser: RankingEntry | null; // logged user's row (even if outside top 100)
   totalParticipants: number;
+}
+
+/**
+ * Public competition leaderboard (rota /boloes/ranking/:competition). Resolves a
+ * competition by its URL slug to its active season and returns that season's
+ * global ranking — but only to authenticated callers (names are private). Anonymous
+ * visitors get the competition/season metadata + crowd size to fuel a join CTA.
+ */
+export interface CompetitionRankingResponse {
+  competition: { id: string; name: string; urlSlug: string };
+  season: {
+    id: string;
+    name: string;
+    seasonLabel: string | null;
+    slug: string | null;
+    status: SeasonStatus;
+  } | null;
+  totalParticipants: number;
+  ranking: RankingResponse | null; // null for anonymous visitors (privacy/LGPD)
 }
 
 export interface MatchRankingResponse extends RankingResponse {
@@ -42,13 +64,11 @@ export interface EngagementResponse {
 interface Acc {
   user: { id: string; name: string; avatarUrl: string | null };
   points: number;
-  exact: number;
-  scored: number;
+  exact: number; // "cravadas"
+  scored: number; // "pontuadas" (predictions on a counted match)
+  predicted: number; // "palpitadas" (predictions made in this scope)
   prediction?: { home: number; away: number };
   tier?: ScoreTier;
-  // Tiebreaker: epoch ms of the relevant prediction (this match's, or the
-  // user's earliest in the tournament). Earlier predictions rank higher.
-  predictedAt?: number;
 }
 
 @Injectable()
@@ -57,7 +77,62 @@ export class RankingsService {
     private readonly prisma: PrismaService,
     private readonly scoring: ScoringService,
     private readonly phaseWeight: PhaseWeightService,
+    private readonly competitions: CompetitionsService,
   ) {}
+
+  /**
+   * Public competition leaderboard keyed by URL slug. Logged callers get the full
+   * season ranking; anonymous ones only get the crowd size (no names exposed).
+   */
+  async competitionRanking(
+    urlSlug: string,
+    currentUserId?: string,
+  ): Promise<CompetitionRankingResponse> {
+    const comp = await this.competitions.findByUrlSlug(urlSlug);
+    if (!comp) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'Competição não encontrada.',
+      });
+    }
+    const competition = { id: comp.id, name: comp.name, urlSlug: comp.urlSlug };
+    const active = comp.activeSeason;
+    if (!active) {
+      return { competition, season: null, totalParticipants: 0, ranking: null };
+    }
+    const season = {
+      id: active.id,
+      name: active.name,
+      seasonLabel: active.seasonLabel,
+      slug: active.slug,
+      status: active.status,
+    };
+    if (currentUserId) {
+      const ranking = await this.tournamentRanking(active.id, currentUserId);
+      return {
+        competition,
+        season,
+        totalParticipants: ranking.totalParticipants,
+        ranking,
+      };
+    }
+    return {
+      competition,
+      season,
+      totalParticipants: await this.countParticipants(active.id),
+      ranking: null,
+    };
+  }
+
+  /** Distinct active users with at least one prediction in the season. */
+  private async countParticipants(seasonId: string): Promise<number> {
+    const rows = await this.prisma.prediction.findMany({
+      where: { match: { seasonId }, user: { isActive: true } },
+      distinct: ['userId'],
+      select: { userId: true },
+    });
+    return rows.length;
+  }
 
   async tournamentRanking(
     seasonId: string,
@@ -137,12 +212,11 @@ export class RankingsService {
           points: 0,
           exact: 0,
           scored: 0,
+          predicted: 0,
         };
         acc.set(p.userId, a);
       }
-      // Tiebreaker: the user's earliest prediction in the tournament.
-      const ts = p.createdAt.getTime();
-      if (a.predictedAt === undefined || ts < a.predictedAt) a.predictedAt = ts;
+      a.predicted += 1; // "palpitadas": every prediction in scope (last tiebreak)
       const m = resultByMatch.get(p.matchId);
       if (m) {
         const s = this.scoring.score(
@@ -172,7 +246,7 @@ export class RankingsService {
       select: { id: true, name: true, avatarUrl: true },
     });
     return this.buildResponse(
-      users.map((user) => ({ user, points: 0, exact: 0, scored: 0 })),
+      users.map((user) => ({ user, points: 0, exact: 0, scored: 0, predicted: 0 })),
       currentUserId,
     );
   }
@@ -247,8 +321,8 @@ export class RankingsService {
               points: 0,
               exact: 0,
               scored: 0,
+              predicted: 1,
               prediction: { home: own.homeScore, away: own.awayScore },
-              predictedAt: own.createdAt.getTime(),
             },
           ]
         : [];
@@ -270,8 +344,8 @@ export class RankingsService {
         points: 0,
         exact: 0,
         scored: 0,
+        predicted: 1,
         prediction: { home: p.homeScore, away: p.awayScore },
-        predictedAt: p.createdAt.getTime(),
       };
       if (result) {
         const s = this.scoring.score(
@@ -328,31 +402,36 @@ export class RankingsService {
 
   /** Sort, assign tie-aware ranks, take top 100, and locate the current user. */
   private buildResponse(accs: Acc[], currentUserId?: string): RankingResponse {
+    // Tiebreak order (app-wide): points → cravadas → pontuadas → palpitadas → name.
     accs.sort(
       (a, b) =>
         b.points - a.points ||
-        // Tiebreaker: earlier prediction wins (smaller epoch ms first).
-        (a.predictedAt ?? Infinity) - (b.predictedAt ?? Infinity) ||
         b.exact - a.exact ||
+        b.scored - a.scored ||
+        b.predicted - a.predicted ||
         a.user.name.localeCompare(b.user.name),
     );
+
+    const sameRank = (a: Acc, b: Acc) =>
+      a.points === b.points &&
+      a.exact === b.exact &&
+      a.scored === b.scored &&
+      a.predicted === b.predicted;
 
     const ranked: RankingEntry[] = [];
     for (let i = 0; i < accs.length; i++) {
       const a = accs[i];
-      // Truly tied (same points AND same prediction time) share a rank;
-      // otherwise the time tiebreaker gives distinct, sequential positions.
+      // Truly tied (equal on every criterion) share a rank; otherwise positions
+      // are distinct and sequential.
       const prev = accs[i - 1];
-      const rank =
-        i > 0 && prev.points === a.points && prev.predictedAt === a.predictedAt
-          ? ranked[i - 1].rank
-          : i + 1;
+      const rank = i > 0 && sameRank(prev, a) ? ranked[i - 1].rank : i + 1;
       ranked.push({
         rank,
         user: a.user,
         points: a.points,
         exactCount: a.exact,
         scoredCount: a.scored,
+        predictedCount: a.predicted,
         ...(a.prediction ? { prediction: a.prediction } : {}),
         ...(a.tier ? { tier: a.tier } : {}),
       });

@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import type { SafeUser } from '../users/user.types';
 import {
+  CompetitionRankingResponse,
   MatchRankingResponse,
   RankingResponse,
   RankingsService,
@@ -32,5 +33,17 @@ export class RankingsController {
     @CurrentUser() user?: SafeUser,
   ): Promise<MatchRankingResponse> {
     return this.rankings.matchRanking(id, user?.id);
+  }
+
+  // Public competition leaderboard (BOLÃO > Ranking > <competição>). Optional
+  // auth: logged callers get the full season ranking; anonymous visitors get only
+  // the competition/season metadata + crowd size (names stay private).
+  @Get('competitions/:urlSlug/ranking')
+  @UseGuards(OptionalJwtAuthGuard)
+  competition(
+    @Param('urlSlug') urlSlug: string,
+    @CurrentUser() user?: SafeUser,
+  ): Promise<CompetitionRankingResponse> {
+    return this.rankings.competitionRanking(urlSlug, user?.id);
   }
 }
