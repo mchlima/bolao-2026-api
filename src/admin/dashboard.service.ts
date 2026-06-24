@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsService } from '../events/events.service';
+import { APP_TIMEZONE } from '../common/timezone';
 
 export interface DashboardOverview {
   users: { total: number; active: number; admins: number };
@@ -23,11 +24,12 @@ export interface PredictionsSeries {
 }
 
 export interface SpendSeries {
+  granularity: SeriesGranularity; // 'hour' nunca (gasto é registrado por dia) → day|week|month
   from: string; // 'YYYY-MM-DD' (inclusivo)
   to: string; // 'YYYY-MM-DD' (inclusivo)
   total: number; // gasto total no período (US$)
   items: number; // itens (matérias) gerados no período
-  // série diária contínua (dias sem gasto vêm com cost 0)
+  // série contínua por bucket (lacunas = 0). bucket = 'YYYY-MM-DD' (dia/semana/mês).
   points: { bucket: string; cost: number; items: number }[];
 }
 
@@ -35,6 +37,7 @@ export interface OnlinePresence {
   total: number; // pessoas distintas online (logado conta 1 entre abas/dispositivos)
   devices: number; // dispositivos distintos online (uma pessoa pode ter vários)
   others: number; // não identificados: dispositivos anônimos + ids sem usuário real
+  liveMatches: number; // jogos com status LIVE agora (indicador do topbar)
   users: {
     id: string;
     name: string;
@@ -82,17 +85,20 @@ export class DashboardService {
       })
       .filter((u): u is NonNullable<typeof u> => u !== null)
       .sort((a, b) => a.since.localeCompare(b.since));
+    const liveMatches = await this.prisma.match.count({ where: { status: 'LIVE' } });
     return {
       total: presence.total,
       devices: presence.devices,
       others: presence.anon + unresolved,
+      liveMatches,
       users,
     };
   }
 
   /**
-   * Palpites ao longo do tempo, agregados por dia/semana/mês no fuso de São Paulo
-   * (createdAt é gravado em UTC). Intervalo [from, to] inclusivo em datas locais;
+   * Palpites ao longo do tempo, agregados por dia/semana/mês no fuso da CONTA do
+   * admin logado (`tz`, default = fuso de negócio APP_TIMEZONE). O createdAt é
+   * gravado em UTC e convertido pro fuso na query. Intervalo [from, to] inclusivo;
    * sem from/to assume o mês atual (dia 1 → hoje). A série é contínua: dias/semanas/
    * meses sem palpite vêm com count 0 pra o gráfico não ter buracos.
    */
@@ -100,8 +106,9 @@ export class DashboardService {
     fromRaw?: string,
     toRaw?: string,
     granularityRaw?: string,
+    tz: string = APP_TIMEZONE,
   ): Promise<PredictionsSeries> {
-    const TZ = 'America/Sao_Paulo';
+    const TZ = tz || APP_TIMEZONE;
     const granularity: SeriesGranularity =
       granularityRaw === 'hour' ||
       granularityRaw === 'week' ||
@@ -143,9 +150,17 @@ export class DashboardService {
    * [from, to] e devolve uma série contínua (dias sem gasto vêm com cost 0).
    * Sem from/to assume o mês atual (dia 1 → hoje).
    */
-  async spendSeries(fromRaw?: string, toRaw?: string): Promise<SpendSeries> {
+  async spendSeries(
+    fromRaw?: string,
+    toRaw?: string,
+    tz: string = APP_TIMEZONE,
+    granularityRaw?: string,
+  ): Promise<SpendSeries> {
+    // 'hour' não se aplica ao gasto (registrado por dia) → cai em 'day'.
+    const granularity: SeriesGranularity =
+      granularityRaw === 'week' || granularityRaw === 'month' ? granularityRaw : 'day';
     const isDate = (s?: string): s is string => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
-    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: tz || APP_TIMEZONE });
     const to = isDate(toRaw) ? toRaw : today;
     const from = isDate(fromRaw) ? fromRaw : `${to.slice(0, 8)}01`;
 
@@ -161,21 +176,33 @@ export class DashboardService {
       byDay.set(date, { cost: Number(v.costUsd ?? 0), items: Number(v.items ?? 0) });
     }
 
-    const parse = (s: string) => {
-      const [y, m, d] = s.split('-').map(Number);
-      return new Date(Date.UTC(y, m - 1, d));
+    // O dia (YYYY-MM-DD) cai em qual bucket da granularidade (mesma regra do bucketKeys:
+    // semana = segunda-feira; mês = dia 1).
+    const bucketOf = (day: string): string => {
+      if (granularity === 'month') return `${day.slice(0, 8)}01`;
+      if (granularity === 'week') {
+        const d = new Date(`${day}T00:00:00Z`);
+        const dow = d.getUTCDay(); // 0=Dom..6=Sáb
+        d.setUTCDate(d.getUTCDate() - (dow === 0 ? 6 : dow - 1));
+        return d.toISOString().slice(0, 10);
+      }
+      return day;
     };
-    const fmt = (dt: Date) => dt.toISOString().slice(0, 10);
-    const end = parse(to);
-    const points: { bucket: string; cost: number; items: number }[] = [];
-    for (let d = parse(from); d <= end; d = new Date(d.getTime() + 86400000)) {
-      const k = fmt(d);
-      const e = byDay.get(k);
-      points.push({ bucket: k, cost: e?.cost ?? 0, items: e?.items ?? 0 });
+
+    const agg = new Map<string, { cost: number; items: number }>();
+    for (const k of this.bucketKeys(from, to, granularity)) agg.set(k, { cost: 0, items: 0 });
+    for (const [day, v] of byDay) {
+      const b = agg.get(bucketOf(day));
+      if (b) {
+        b.cost += v.cost;
+        b.items += v.items;
+      }
     }
+
+    const points = [...agg.entries()].map(([bucket, v]) => ({ bucket, cost: v.cost, items: v.items }));
     const total = points.reduce((s, p) => s + p.cost, 0);
     const items = points.reduce((s, p) => s + p.items, 0);
-    return { from, to, total, items, points };
+    return { granularity, from, to, total, items, points };
   }
 
   /** Sequência contínua de buckets (em datas UTC, formatadas) que casa com o

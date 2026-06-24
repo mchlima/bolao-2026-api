@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { APP_TIMEZONE, dateKeyInTz } from '../common/timezone';
 
 const CONFIG_KEY = 'content.config';
 
@@ -66,8 +67,11 @@ export class ContentSettingsService {
   }
 
   // ── daily usage ──
+  // Bucket diário do teto: a borda do dia é o fuso de NEGÓCIO (regional), não UTC.
+  // toISOString() dava a data UTC → o teto "zerava às 21h" (00h UTC). Agora vira à
+  // meia-noite local. Ver src/common/timezone.ts.
   private usageKey(date = new Date()): string {
-    return `content.usage.${date.toISOString().slice(0, 10)}`;
+    return `content.usage.${dateKeyInTz(date, APP_TIMEZONE)}`;
   }
 
   async getTodayUsage(): Promise<DayUsage> {
