@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -7,6 +7,7 @@ import {
   DashboardOverview,
   DashboardService,
   OnlinePresence,
+  PredictionsSeries,
 } from './dashboard.service';
 
 @Controller('admin/dashboard')
@@ -23,5 +24,16 @@ export class AdminDashboardController {
   @Get('online')
   online(): Promise<OnlinePresence> {
     return this.dashboard.online();
+  }
+
+  // Série de palpites no tempo (gráfico da dashboard). from/to = 'YYYY-MM-DD'
+  // (fuso SP, inclusivo); granularity = day|week|month. Sem params → mês atual.
+  @Get('predictions-series')
+  predictionsSeries(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('granularity') granularity?: string,
+  ): Promise<PredictionsSeries> {
+    return this.dashboard.predictionsSeries(from, to, granularity);
   }
 }

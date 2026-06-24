@@ -11,6 +11,17 @@ export interface DashboardOverview {
   predictions: number;
 }
 
+export type SeriesGranularity = 'hour' | 'day' | 'week' | 'month';
+
+export interface PredictionsSeries {
+  granularity: SeriesGranularity;
+  from: string; // 'YYYY-MM-DD' (inclusive, fuso de São Paulo)
+  to: string; // 'YYYY-MM-DD' (inclusive)
+  total: number; // soma dos palpites no período
+  // bucket: 'YYYY-MM-DD' (dia/semana/mês) ou 'YYYY-MM-DD HH:00' (hora). Contínuo (lacunas = 0).
+  points: { bucket: string; count: number }[];
+}
+
 export interface OnlinePresence {
   total: number; // pessoas distintas online (logado conta 1 entre abas/dispositivos)
   devices: number; // dispositivos distintos online (uma pessoa pode ter vários)
@@ -68,6 +79,95 @@ export class DashboardService {
       others: presence.anon + unresolved,
       users,
     };
+  }
+
+  /**
+   * Palpites ao longo do tempo, agregados por dia/semana/mês no fuso de São Paulo
+   * (createdAt é gravado em UTC). Intervalo [from, to] inclusivo em datas locais;
+   * sem from/to assume o mês atual (dia 1 → hoje). A série é contínua: dias/semanas/
+   * meses sem palpite vêm com count 0 pra o gráfico não ter buracos.
+   */
+  async predictionsSeries(
+    fromRaw?: string,
+    toRaw?: string,
+    granularityRaw?: string,
+  ): Promise<PredictionsSeries> {
+    const TZ = 'America/Sao_Paulo';
+    const granularity: SeriesGranularity =
+      granularityRaw === 'hour' ||
+      granularityRaw === 'week' ||
+      granularityRaw === 'month'
+        ? granularityRaw
+        : 'day';
+    const isDate = (s?: string): s is string => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: TZ }); // YYYY-MM-DD
+    const to = isDate(toRaw) ? toRaw : today;
+    const from = isDate(fromRaw) ? fromRaw : `${to.slice(0, 8)}01`;
+
+    const fmtMask = granularity === 'hour' ? 'YYYY-MM-DD HH24:00' : 'YYYY-MM-DD';
+    const rows = await this.prisma.$queryRaw<{ bucket: string; count: number }[]>`
+      WITH p AS (
+        SELECT (("createdAt" AT TIME ZONE 'UTC') AT TIME ZONE ${TZ}) AS local_ts
+        FROM "predictions"
+      )
+      SELECT to_char(date_trunc(${granularity}, local_ts), ${fmtMask}) AS bucket,
+             count(*)::int AS count
+      FROM p
+      WHERE local_ts >= ${from}::date
+        AND local_ts < (${to}::date + interval '1 day')
+      GROUP BY 1
+      ORDER BY 1
+    `;
+    const counts = new Map(rows.map((r) => [r.bucket, Number(r.count)]));
+
+    const points = this.bucketKeys(from, to, granularity).map((bucket) => ({
+      bucket,
+      count: counts.get(bucket) ?? 0,
+    }));
+    const total = points.reduce((s, p) => s + p.count, 0);
+    return { granularity, from, to, total, points };
+  }
+
+  /** Sequência contínua de buckets (em datas UTC, formatadas) que casa com o
+   * date_trunc do Postgres: hora a hora; dia a dia; semana começa na segunda;
+   * mês no dia 1. Hora usa 'YYYY-MM-DD HH:00'; os demais 'YYYY-MM-DD'. */
+  private bucketKeys(
+    from: string,
+    to: string,
+    granularity: SeriesGranularity,
+  ): string[] {
+    const fmt = (d: Date) => d.toISOString().slice(0, 10);
+    const parse = (s: string) => new Date(`${s}T00:00:00Z`);
+    const end = parse(to);
+    const keys: string[] = [];
+    if (granularity === 'hour') {
+      const fmtHour = (d: Date) => `${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)}`;
+      const endExclusive = new Date(end.getTime() + 86400000); // fim do dia "to"
+      for (let d = parse(from); d < endExclusive; d = new Date(d.getTime() + 3600000)) {
+        keys.push(fmtHour(d));
+      }
+      return keys;
+    }
+    if (granularity === 'month') {
+      let d = parse(`${from.slice(0, 8)}01`);
+      while (d <= end) {
+        keys.push(fmt(d));
+        d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1));
+      }
+    } else {
+      let d = parse(from);
+      if (granularity === 'week') {
+        // recua até a segunda-feira (date_trunc('week') do Postgres é ISO/segunda)
+        const dow = d.getUTCDay(); // 0=Dom..6=Sáb
+        d.setUTCDate(d.getUTCDate() - (dow === 0 ? 6 : dow - 1));
+      }
+      const step = granularity === 'week' ? 7 : 1;
+      while (d <= end) {
+        keys.push(fmt(d));
+        d = new Date(d.getTime() + step * 86400000);
+      }
+    }
+    return keys;
   }
 
   async overview(): Promise<DashboardOverview> {
