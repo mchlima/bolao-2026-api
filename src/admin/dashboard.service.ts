@@ -22,6 +22,15 @@ export interface PredictionsSeries {
   points: { bucket: string; count: number }[];
 }
 
+export interface SpendSeries {
+  from: string; // 'YYYY-MM-DD' (inclusivo)
+  to: string; // 'YYYY-MM-DD' (inclusivo)
+  total: number; // gasto total no período (US$)
+  items: number; // itens (matérias) gerados no período
+  // série diária contínua (dias sem gasto vêm com cost 0)
+  points: { bucket: string; cost: number; items: number }[];
+}
+
 export interface OnlinePresence {
   total: number; // pessoas distintas online (logado conta 1 entre abas/dispositivos)
   devices: number; // dispositivos distintos online (uma pessoa pode ter vários)
@@ -126,6 +135,47 @@ export class DashboardService {
     }));
     const total = points.reduce((s, p) => s + p.count, 0);
     return { granularity, from, to, total, points };
+  }
+
+  /**
+   * Gasto DIÁRIO com geração de conteúdo (Claude). Lê os registros diários de uso
+   * (AppSetting `content.usage.YYYY-MM-DD` = { items, costUsd }) no intervalo
+   * [from, to] e devolve uma série contínua (dias sem gasto vêm com cost 0).
+   * Sem from/to assume o mês atual (dia 1 → hoje).
+   */
+  async spendSeries(fromRaw?: string, toRaw?: string): Promise<SpendSeries> {
+    const isDate = (s?: string): s is string => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+    const to = isDate(toRaw) ? toRaw : today;
+    const from = isDate(fromRaw) ? fromRaw : `${to.slice(0, 8)}01`;
+
+    const PREFIX = 'content.usage.';
+    const rows = await this.prisma.appSetting.findMany({
+      where: { key: { startsWith: PREFIX } },
+    });
+    const byDay = new Map<string, { cost: number; items: number }>();
+    for (const r of rows) {
+      const date = r.key.slice(PREFIX.length); // YYYY-MM-DD
+      if (date < from || date > to) continue;
+      const v = (r.value as { costUsd?: number; items?: number } | null) ?? {};
+      byDay.set(date, { cost: Number(v.costUsd ?? 0), items: Number(v.items ?? 0) });
+    }
+
+    const parse = (s: string) => {
+      const [y, m, d] = s.split('-').map(Number);
+      return new Date(Date.UTC(y, m - 1, d));
+    };
+    const fmt = (dt: Date) => dt.toISOString().slice(0, 10);
+    const end = parse(to);
+    const points: { bucket: string; cost: number; items: number }[] = [];
+    for (let d = parse(from); d <= end; d = new Date(d.getTime() + 86400000)) {
+      const k = fmt(d);
+      const e = byDay.get(k);
+      points.push({ bucket: k, cost: e?.cost ?? 0, items: e?.items ?? 0 });
+    }
+    const total = points.reduce((s, p) => s + p.cost, 0);
+    const items = points.reduce((s, p) => s + p.items, 0);
+    return { from, to, total, items, points };
   }
 
   /** Sequência contínua de buckets (em datas UTC, formatadas) que casa com o

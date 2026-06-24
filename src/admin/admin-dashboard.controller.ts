@@ -8,6 +8,7 @@ import {
   DashboardService,
   OnlinePresence,
   PredictionsSeries,
+  SpendSeries,
 } from './dashboard.service';
 
 @Controller('admin/dashboard')
@@ -35,5 +36,15 @@ export class AdminDashboardController {
     @Query('granularity') granularity?: string,
   ): Promise<PredictionsSeries> {
     return this.dashboard.predictionsSeries(from, to, granularity);
+  }
+
+  // Série de gasto diário com geração de conteúdo (US$). from/to = 'YYYY-MM-DD'
+  // (inclusivo). Sem params → mês atual.
+  @Get('spend-series')
+  spendSeries(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ): Promise<SpendSeries> {
+    return this.dashboard.spendSeries(from, to);
   }
 }
