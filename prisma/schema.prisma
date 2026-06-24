@@ -324,6 +324,11 @@ model Competition {
   confederation  String? // "FIFA", "UEFA", "CONMEBOL", "CBF"...
   logoUrl        String? // light/default variant
   logoUrlDark    String? // dark-background variant (shown in the dark theme)
+  // Artigo definido do nome, p/ concordância gramatical no conteúdo SSR (SEO/GEO):
+  // "o" (Brasileirão), "a" (Copa do Mundo), "os", "as" (plural, ex.: Eliminatórias).
+  // Codifica gênero (a/as = feminino) e número (os/as = plural). null = sem artigo
+  // (texto degrada pra forma neutra). Preenchido manualmente no admin.
+  article        String? // 'o' | 'a' | 'os' | 'as'
   // External provider refs in one JSON blob, e.g.
   // { "espn": { "slug": "bra.1" }, "ge": { "championshipId": "<uuid>", "phase": "<slug>" } }.
   // espn.slug is the league the live robot polls. (Replaces espnLeagueSlug.)

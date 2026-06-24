@@ -1,6 +1,7 @@
 import { CompetitionType } from '@prisma/client';
 import {
   IsEnum,
+  IsIn,
   IsOptional,
   IsString,
   Matches,
@@ -40,6 +41,11 @@ export class CreateCompetitionDto {
   @IsString()
   @MaxLength(500)
   logoUrl?: string;
+
+  // Artigo gramatical do nome p/ conteúdo SSR: 'o' | 'a' | 'os' | 'as' (ou null).
+  @IsOptional()
+  @IsIn(['o', 'a', 'os', 'as'])
+  article?: string | null;
 
   // ESPN league slug used by the live robot, e.g. "fifa.world".
   @IsOptional()

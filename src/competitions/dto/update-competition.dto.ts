@@ -1,6 +1,7 @@
 import { CompetitionType } from '@prisma/client';
 import {
   IsEnum,
+  IsIn,
   IsOptional,
   IsString,
   Matches,
@@ -42,6 +43,11 @@ export class UpdateCompetitionDto {
   @IsString()
   @MaxLength(500)
   logoUrl?: string;
+
+  // Artigo gramatical do nome p/ conteúdo SSR: 'o' | 'a' | 'os' | 'as' (null limpa).
+  @IsOptional()
+  @IsIn(['o', 'a', 'os', 'as'])
+  article?: string | null;
 
   @IsOptional()
   @IsString()
