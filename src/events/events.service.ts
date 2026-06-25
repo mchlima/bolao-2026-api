@@ -13,7 +13,12 @@ interface Connection {
   userId: string | null; // from the front's `user:<id>` room; trusted best-effort
   deviceId: string | null; // stable per-browser id; null for old/unidentified clients
   since: Date;
+  rooms: string[]; // rooms this stream subscribed to — powers per-room presence
 }
+
+// A chat room name (pool:<p>:match:<m>:chat). Joining/leaving one emits a live
+// presence count to it, so the chat header can show "X na sala" in real time.
+const isChatRoom = (room: string): boolean => room.endsWith(':chat');
 
 export interface Presence {
   total: number; // distinct people online (a logged-in user counts once across
@@ -41,14 +46,50 @@ export class EventsService {
   private nextConnId = 1;
 
   /** Register an open SSE stream; returns an id to release it on disconnect. */
-  addConnection(userId: string | null, deviceId: string | null): number {
+  addConnection(
+    userId: string | null,
+    deviceId: string | null,
+    rooms: string[] = [],
+  ): number {
     const id = this.nextConnId++;
-    this.connections.set(id, { userId, deviceId, since: new Date() });
+    this.connections.set(id, { userId, deviceId, since: new Date(), rooms });
+    // Defer until after the SSE controller has subscribed THIS connection to the
+    // subject — emitting synchronously here fires before the subscription, so the
+    // joining client would miss its own headcount (showing a stale count when alone).
+    const chatRooms = rooms.filter(isChatRoom);
+    if (chatRooms.length)
+      setImmediate(() => {
+        for (const r of chatRooms) this.publishChatPresence(r);
+      });
     return id;
   }
 
   removeConnection(id: number): void {
+    const c = this.connections.get(id);
     this.connections.delete(id);
+    if (c)
+      for (const r of c.rooms) if (isChatRoom(r)) this.publishChatPresence(r);
+  }
+
+  /** Distinct people currently in a room — a logged-in user counts once across
+   * tabs/devices; an anonymous browser once per device (same dedup as presence()). */
+  roomPresence(room: string): number {
+    const users = new Set<string>();
+    const anonDevices = new Set<string>();
+    for (const [id, c] of this.connections) {
+      if (!c.rooms.includes(room)) continue;
+      if (c.userId) users.add(c.userId);
+      else anonDevices.add(c.deviceId ?? `conn:${id}`);
+    }
+    return users.size + anonDevices.size;
+  }
+
+  /** Push the live headcount of a chat room to its subscribers. */
+  private publishChatPresence(room: string): void {
+    this.subject.next({
+      room,
+      data: { type: 'presence', count: this.roomPresence(room) },
+    });
   }
 
   /** Snapshot of who's connected, counted by person/device rather than by raw

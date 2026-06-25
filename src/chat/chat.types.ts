@@ -24,13 +24,17 @@ export interface ChatListResult {
   messages: ChatMessageView[];
   open: boolean; // janela de escrita aberta agora (ver isChatRoomOpen)
   hasMore: boolean; // há mensagens mais antigas além desta página
+  canModerate: boolean; // o viewer pode apagar QUALQUER msg (dono/admin do bolão ou admin global)
+  presence: number; // pessoas na sala agora ("X na sala")
 }
 
 /**
  * Payload empurrado pelo SSE na room do chat. O cliente faz APPEND num 'msg'
- * (dedup por id/nonce) e remove num 'del'. Um evento sem payload (reconexão) NÃO
- * passa por aqui — naquele caso o front refaz o fetch e reconcilia com o banco.
+ * (dedup por id/nonce), remove num 'del', e atualiza o contador num 'presence'.
+ * Um evento sem payload (reconexão) NÃO passa por aqui — naquele caso o front
+ * refaz o fetch e reconcilia com o banco.
  */
 export type ChatEvent =
   | { type: 'msg'; message: ChatMessageView }
-  | { type: 'del'; id: string };
+  | { type: 'del'; id: string }
+  | { type: 'presence'; count: number };

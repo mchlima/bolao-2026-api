@@ -49,7 +49,11 @@ export class ChatService {
     matchId: string,
     opts: { before?: string; limit?: number },
   ): Promise<ChatListResult> {
-    const match = await this.authorize(user.id, poolId, matchId);
+    const { match, memberRole } = await this.authorize(
+      user.id,
+      poolId,
+      matchId,
+    );
     const take = Math.min(Math.max(opts.limit ?? MAX_PAGE, 1), MAX_PAGE);
     const where: Prisma.ChatMessageWhereInput = {
       poolId,
@@ -66,10 +70,16 @@ export class ChatService {
     });
     const hasMore = rows.length > take;
     const page = (hasMore ? rows.slice(0, take) : rows).reverse(); // cronológica p/ exibir
+    const canModerate =
+      user.role === UserRole.ADMIN ||
+      memberRole === PoolMemberRole.OWNER ||
+      memberRole === PoolMemberRole.ADMIN;
     return {
       messages: page.map(toView),
       open: isChatRoomOpen(match, new Date()),
       hasMore,
+      canModerate, // dono/admin do bolão ou admin global → pode apagar qualquer msg
+      presence: this.events.roomPresence(chatRoom(poolId, matchId)), // "X na sala"
     };
   }
 
@@ -80,7 +90,7 @@ export class ChatService {
     matchId: string,
     input: { text: string; nonce?: string },
   ): Promise<ChatMessageView> {
-    const match = await this.authorize(user.id, poolId, matchId);
+    const { match } = await this.authorize(user.id, poolId, matchId);
     const text = input.text.trim();
     if (!text)
       throw new HttpException('Mensagem vazia.', HttpStatus.BAD_REQUEST);
@@ -150,10 +160,10 @@ export class ChatService {
     userId: string,
     poolId: string,
     matchId: string,
-  ): Promise<ChatWindowMatch> {
+  ): Promise<{ match: ChatWindowMatch; memberRole: PoolMemberRole }> {
     const member = await this.prisma.poolMember.findUnique({
       where: { poolId_userId: { poolId, userId } },
-      select: { id: true },
+      select: { role: true },
     });
     if (!member)
       throw new ForbiddenException('Você não participa deste bolão.');
@@ -177,9 +187,12 @@ export class ChatService {
       throw new ForbiddenException('Esta partida não faz parte deste bolão.');
 
     return {
-      status: match.status,
-      kickoffAt: match.kickoffAt,
-      finishedAt: match.finishedAt,
+      match: {
+        status: match.status,
+        kickoffAt: match.kickoffAt,
+        finishedAt: match.finishedAt,
+      },
+      memberRole: member.role,
     };
   }
 
