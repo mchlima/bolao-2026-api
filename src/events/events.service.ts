@@ -4,6 +4,9 @@ import { filter } from 'rxjs/operators';
 
 export interface RealtimeEvent {
   room: string;
+  // Optional payload pushed straight to subscribers (chat messages). Absent for
+  // the usual "refetch" signals from emit() — clients treat no-data as "resync".
+  data?: unknown;
 }
 
 interface Connection {
@@ -99,6 +102,18 @@ export class EventsService {
       this.pending.clear();
     }, 2000);
     if (typeof this.timer.unref === 'function') this.timer.unref();
+  }
+
+  /**
+   * Push an event WITH a payload to a room, IMMEDIATELY — bypassing the coalescing
+   * in emit(). For low-volume, latency-sensitive streams (chat) where every message
+   * must arrive: emit() collapses a burst per room into one signal and carries no
+   * body, so two quick messages would become a single payload-less ping. Clients
+   * append on a data event and fall back to a refetch on a payload-less one (the
+   * reconnect/resync path), so a dropped event self-heals from the DB.
+   */
+  publish(room: string, data: unknown): void {
+    if (room) this.subject.next({ room, data });
   }
 
   stream(rooms: string[]): Observable<RealtimeEvent> {

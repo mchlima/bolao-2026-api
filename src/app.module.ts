@@ -32,6 +32,7 @@ import { MonitorModule } from './monitor/monitor.module';
 import { FollowsModule } from './follows/follows.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
+import { ChatModule } from './chat/chat.module';
 import { StandingsModule } from './standings/standings.module';
 import { ContentModule } from './content/content.module';
 
@@ -61,6 +62,7 @@ import { ContentModule } from './content/content.module';
     FollowsModule,
     NotificationsModule,
     CampaignsModule,
+    ChatModule,
     StandingsModule,
     AdminModule,
     LiveIngestModule,

@@ -156,6 +156,7 @@ model User {
   scheduledNotifications ScheduledNotification[]
   pushSubscriptions      PushSubscription[]
   oauthAccounts          OAuthAccount[]
+  chatMessages           ChatMessage[]
 
   @@map("users")
 }
@@ -311,32 +312,32 @@ model FollowedMatch {
 // external keys — notably espnLeagueSlug, which lets the live robot poll any
 // league via .../soccer/<slug>/scoreboard (one engine, many tournaments).
 model Competition {
-  id             String          @id @default(cuid())
-  sportId        String // the sport this competition belongs to (default: Futebol)
-  name           String
-  slug           String // internal stable key, e.g. "fifa.world", "bra.1" (unique per sport)
+  id            String          @id @default(cuid())
+  sportId       String // the sport this competition belongs to (default: Futebol)
+  name          String
+  slug          String // internal stable key, e.g. "fifa.world", "bra.1" (unique per sport)
   // Slug PÚBLICO de URL (ex.: "brasileirao-serie-a", "copa-do-mundo"), usado nas
   // rotas /futebol/campeonato/:urlSlug. Distinto do slug interno (com ponto do
   // provider). Único global. Backfill preenche.
-  urlSlug        String?         @unique
-  type           CompetitionType
-  country        String? // null for international/continental competitions
-  confederation  String? // "FIFA", "UEFA", "CONMEBOL", "CBF"...
-  logoUrl        String? // light/default variant
-  logoUrlDark    String? // dark-background variant (shown in the dark theme)
+  urlSlug       String?         @unique
+  type          CompetitionType
+  country       String? // null for international/continental competitions
+  confederation String? // "FIFA", "UEFA", "CONMEBOL", "CBF"...
+  logoUrl       String? // light/default variant
+  logoUrlDark   String? // dark-background variant (shown in the dark theme)
   // Artigo definido do nome, p/ concordância gramatical no conteúdo SSR (SEO/GEO):
   // "o" (Brasileirão), "a" (Copa do Mundo), "os", "as" (plural, ex.: Eliminatórias).
   // Codifica gênero (a/as = feminino) e número (os/as = plural). null = sem artigo
   // (texto degrada pra forma neutra). Preenchido manualmente no admin.
-  article        String? // 'o' | 'a' | 'os' | 'as'
+  article       String? // 'o' | 'a' | 'os' | 'as'
   // External provider refs in one JSON blob, e.g.
   // { "espn": { "slug": "bra.1" }, "ge": { "championshipId": "<uuid>", "phase": "<slug>" } }.
   // espn.slug is the league the live robot polls. (Replaces espnLeagueSlug.)
-  externalIds    Json?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  externalIds   Json?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
 
-  sport   Sport     @relation(fields: [sportId], references: [id])
+  sport   Sport    @relation(fields: [sportId], references: [id])
   seasons Season[]
 
   @@unique([sportId, slug])
@@ -546,15 +547,15 @@ model Team {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  sport       Sport       @relation(fields: [sportId], references: [id])
-  homeMatches Match[]     @relation("HomeTeam")
-  awayMatches Match[]     @relation("AwayTeam")
-  groupTeams  GroupTeam[]
-  homeTies    Tie[]       @relation("TieHome")
-  awayTies    Tie[]       @relation("TieAway")
-  wonTies     Tie[]       @relation("TieWinner")
-  wonSeasons  Season[]    @relation("SeasonWinner")
-  players     Player[]
+  sport         Sport              @relation(fields: [sportId], references: [id])
+  homeMatches   Match[]            @relation("HomeTeam")
+  awayMatches   Match[]            @relation("AwayTeam")
+  groupTeams    GroupTeam[]
+  homeTies      Tie[]              @relation("TieHome")
+  awayTies      Tie[]              @relation("TieAway")
+  wonTies       Tie[]              @relation("TieWinner")
+  wonSeasons    Season[]           @relation("SeasonWinner")
+  players       Player[]
   lineupEntries MatchLineupEntry[]
   events        MatchEvent[]
   stats         MatchStat[]
@@ -678,18 +679,18 @@ model MatchLineupEntry {
 }
 
 model Stadium {
-  id        String   @id @default(cuid())
-  name      String
-  city      String
-  state     String? // state/region
-  country   String
+  id             String   @id @default(cuid())
+  name           String
+  city           String
+  state          String? // state/region
+  country        String
   // Stadium photo mirrored to our R2 (sourced from Wikidata P18 / Wikimedia
   // Commons). photoCredit/photoSourceUrl carry the required CC attribution.
   photoUrl       String?
   photoCredit    String? // "Autor / Licença" (Wikimedia Commons)
   photoSourceUrl String? // Commons file page (provenance + attribution link)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   matches Match[]
 
@@ -771,13 +772,13 @@ model Match {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  season      Season       @relation(fields: [seasonId], references: [id])
-  stage       Stage?       @relation(fields: [stageId], references: [id])
-  group       Group?       @relation(fields: [groupId], references: [id])
-  round       Round?       @relation(fields: [roundId], references: [id])
-  tie         Tie?         @relation(fields: [tieId], references: [id])
-  homeTeam    Team?        @relation("HomeTeam", fields: [homeTeamId], references: [id])
-  awayTeam    Team?        @relation("AwayTeam", fields: [awayTeamId], references: [id])
+  season        Season             @relation(fields: [seasonId], references: [id])
+  stage         Stage?             @relation(fields: [stageId], references: [id])
+  group         Group?             @relation(fields: [groupId], references: [id])
+  round         Round?             @relation(fields: [roundId], references: [id])
+  tie           Tie?               @relation(fields: [tieId], references: [id])
+  homeTeam      Team?              @relation("HomeTeam", fields: [homeTeamId], references: [id])
+  awayTeam      Team?              @relation("AwayTeam", fields: [awayTeamId], references: [id])
   stadium       Stadium?           @relation(fields: [stadiumId], references: [id])
   predictions   Prediction[]
   lineupEntries MatchLineupEntry[]
@@ -787,6 +788,7 @@ model Match {
   newsItems     NewsItem[]
   notes         MatchNote[]
   commentary    MatchCommentary[]
+  chatMessages  ChatMessage[]
 
   @@unique([seasonId, matchNumber]) // idempotent fixture seeding
   @@index([seasonId])
@@ -838,6 +840,33 @@ model MatchCommentary {
 
   @@index([matchId])
   @@map("match_commentary")
+}
+
+// Mensagem do CHAT da partida, escrita por um usuário. Efêmera no acesso (a sala
+// só abre no dia/durante o jogo — ver chat-window.util), mas PERSISTIDA: o banco é
+// a fonte da verdade; o SSE (EventsService.publish na room pool:<p>:match:<m>:chat)
+// é só a entrega ao vivo. poolId escopa a sala ao bolão (null reservado p/ uma
+// futura sala global por partida). nonce = idempotência otimista cliente→servidor
+// (casa o eco do SSE com a mensagem renderizada na hora). Moderação por soft-delete
+// (deletedAt/deletedById) + AuditLog; histórico preservado.
+model ChatMessage {
+  id          String    @id @default(cuid())
+  matchId     String
+  poolId      String? // sala do bolão; null = sala global da partida (futuro)
+  userId      String
+  text        String // até 2000 chars (validado na borda)
+  nonce       String? // id do cliente p/ dedup do eco otimista; sem unicidade no banco
+  deletedAt   DateTime? // soft-delete (moderação); some da listagem, fica no histórico
+  deletedById String? // quem apagou (autor, dono/admin do bolão ou admin global)
+  createdAt   DateTime  @default(now())
+
+  match Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  pool  Pool? @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@index([poolId, matchId, createdAt]) // paginação da sala do bolão
+  @@index([matchId, createdAt]) // sala global da partida (futuro)
+  @@map("chat_messages")
 }
 
 model Prediction {
@@ -897,10 +926,11 @@ model Pool {
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
 
-  owner   User         @relation("PoolOwner", fields: [ownerId], references: [id])
-  members PoolMember[]
-  invites PoolInvite[]
-  runs    PoolRun[]
+  owner        User          @relation("PoolOwner", fields: [ownerId], references: [id])
+  members      PoolMember[]
+  invites      PoolInvite[]
+  runs         PoolRun[]
+  chatMessages ChatMessage[]
 
   @@index([ownerId])
   @@map("pools")
