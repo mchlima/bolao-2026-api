@@ -5,10 +5,17 @@ import { PushController } from './push.controller';
 import { PushService } from './push.service';
 import { ReminderService } from './reminder.service';
 import { ScheduledNotificationService } from './scheduled-notification.service';
+import { OnboardingNudgeService } from './onboarding-nudge.service';
 
 @Module({
   controllers: [NotificationsController, PushController],
-  providers: [NotificationsService, PushService, ReminderService, ScheduledNotificationService],
+  providers: [
+    NotificationsService,
+    PushService,
+    ReminderService,
+    ScheduledNotificationService,
+    OnboardingNudgeService,
+  ],
   exports: [NotificationsService, PushService, ScheduledNotificationService],
 })
 export class NotificationsModule {}
