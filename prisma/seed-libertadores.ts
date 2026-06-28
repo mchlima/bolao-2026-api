@@ -90,6 +90,25 @@ function pick(c: EspnEvent['competitions'][0], side: 'home' | 'away'): EspnCompe
 
 const isKnockout = (slug?: string): slug is string => !!slug && slug in KNOCKOUT;
 
+// ESPN standings → the 8 groups (A–H) with their team ids. The scoreboard events
+// don't carry the group, so group membership comes from here (needed for tables).
+interface EspnStandings {
+  children?: { name?: string; displayName?: string; standings?: { entries?: { team?: { id?: string } }[] } }[];
+}
+async function fetchGroups(): Promise<{ letter: string; order: number; espnTeamIds: string[] }[]> {
+  const res = await fetch(`https://site.api.espn.com/apis/v2/sports/soccer/${ESPN_SLUG}/standings`, {
+    headers: { 'user-agent': 'Mozilla/5.0', accept: 'application/json' },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!res.ok) throw new Error(`ESPN standings ${res.status}`);
+  const json = (await res.json()) as EspnStandings;
+  return (json.children ?? []).map((g, i) => ({
+    letter: (g.name ?? g.displayName ?? '').replace(/^Group\s+/i, '').trim() || String.fromCharCode(65 + i),
+    order: i + 1,
+    espnTeamIds: (g.standings?.entries ?? []).map((e) => e.team?.id).filter(Boolean) as string[],
+  }));
+}
+
 async function run(): Promise<void> {
   console.log(`Seeding CONMEBOL Libertadores 2026 (ESPN)${DRY ? ' — DRY RUN' : ''}…`);
 
@@ -181,6 +200,33 @@ async function run(): Promise<void> {
     (await prisma.stage.create({
       data: { seasonId: season.id, name: 'Fase de Grupos', format: 'GROUP', order: 1, tiebreakPreset: 'CONMEBOL' },
     }));
+
+  // Groups A–H + their teams (from ESPN standings) so the group tables can be built.
+  const groups = await fetchGroups();
+  const groupIdByEspnTeam = new Map<string, string>();
+  const groupLetterByEspnTeam = new Map<string, string>();
+  for (const g of groups) {
+    const row =
+      (await prisma.group.findFirst({ where: { stageId: groupStage.id, name: g.letter } })) ??
+      (await prisma.group.create({ data: { stageId: groupStage.id, name: g.letter, order: g.order } }));
+    for (const espnId of g.espnTeamIds) {
+      const teamId = teamByEspn.get(espnId);
+      if (!teamId) continue;
+      await prisma.groupTeam.upsert({
+        where: { groupId_teamId: { groupId: row.id, teamId } },
+        update: {},
+        create: { groupId: row.id, teamId },
+      });
+      groupIdByEspnTeam.set(espnId, row.id);
+      groupLetterByEspnTeam.set(espnId, g.letter);
+    }
+  }
+  // Top 2 of each group advance to the knockout (classification band for the table).
+  await prisma.stage.update({
+    where: { id: groupStage.id },
+    data: { zones: [{ from: 1, to: 2, label: 'Classificados às oitavas', tone: 'green' }] },
+  });
+
   const koStage =
     (await prisma.stage.findFirst({ where: { seasonId: season.id, order: 2 } })) ??
     (await prisma.stage.create({
@@ -270,6 +316,8 @@ async function run(): Promise<void> {
     const data = {
       seasonId: season.id,
       stageId: isGroup ? groupStage.id : koStage.id,
+      groupId: isGroup && home?.team?.id ? (groupIdByEspnTeam.get(home.team.id) ?? null) : null,
+      groupName: isGroup && home?.team?.id ? (groupLetterByEspnTeam.get(home.team.id) ?? null) : null,
       roundId: isGroup ? null : await knockoutRound(slug),
       leg: isGroup ? null : (legOf.get(e.id) ?? 1),
       kickoffAt: new Date(e.date),
