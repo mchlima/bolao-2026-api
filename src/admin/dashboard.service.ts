@@ -108,19 +108,12 @@ export class DashboardService {
     granularityRaw?: string,
     tz: string = APP_TIMEZONE,
   ): Promise<PredictionsSeries> {
-    const TZ = tz || APP_TIMEZONE;
-    const granularity: SeriesGranularity =
-      granularityRaw === 'hour' ||
-      granularityRaw === 'week' ||
-      granularityRaw === 'month'
-        ? granularityRaw
-        : 'day';
-    const isDate = (s?: string): s is string => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
-    const today = new Date().toLocaleDateString('en-CA', { timeZone: TZ }); // YYYY-MM-DD
-    const to = isDate(toRaw) ? toRaw : today;
-    const from = isDate(fromRaw) ? fromRaw : `${to.slice(0, 8)}01`;
-
-    const fmtMask = granularity === 'hour' ? 'YYYY-MM-DD HH24:00' : 'YYYY-MM-DD';
+    const { TZ, granularity, from, to, fmtMask } = this.resolveSeriesRange(
+      fromRaw,
+      toRaw,
+      granularityRaw,
+      tz,
+    );
     const rows = await this.prisma.$queryRaw<{ bucket: string; count: number }[]>`
       WITH p AS (
         SELECT (("createdAt" AT TIME ZONE 'UTC') AT TIME ZONE ${TZ}) AS local_ts
@@ -142,6 +135,83 @@ export class DashboardService {
     }));
     const total = points.reduce((s, p) => s + p.count, 0);
     return { granularity, from, to, total, points };
+  }
+
+  /**
+   * Pessoas DISTINTAS que palpitaram ao longo do tempo (mesmos buckets/fuso da
+   * série de palpites). O `count` de cada bucket é o nº de usuários únicos que
+   * cravaram naquele intervalo; `total` é o nº de usuários únicos no período
+   * INTEIRO — NÃO a soma dos buckets, já que a mesma pessoa palpita em vários dias.
+   */
+  async predictorsSeries(
+    fromRaw?: string,
+    toRaw?: string,
+    granularityRaw?: string,
+    tz: string = APP_TIMEZONE,
+  ): Promise<PredictionsSeries> {
+    const { TZ, granularity, from, to, fmtMask } = this.resolveSeriesRange(
+      fromRaw,
+      toRaw,
+      granularityRaw,
+      tz,
+    );
+    const rows = await this.prisma.$queryRaw<{ bucket: string; count: number }[]>`
+      WITH p AS (
+        SELECT (("createdAt" AT TIME ZONE 'UTC') AT TIME ZONE ${TZ}) AS local_ts, "userId"
+        FROM "predictions"
+      )
+      SELECT to_char(date_trunc(${granularity}, local_ts), ${fmtMask}) AS bucket,
+             count(DISTINCT "userId")::int AS count
+      FROM p
+      WHERE local_ts >= ${from}::date
+        AND local_ts < (${to}::date + interval '1 day')
+      GROUP BY 1
+      ORDER BY 1
+    `;
+    const counts = new Map(rows.map((r) => [r.bucket, Number(r.count)]));
+    const points = this.bucketKeys(from, to, granularity).map((bucket) => ({
+      bucket,
+      count: counts.get(bucket) ?? 0,
+    }));
+    // total = usuários únicos no período inteiro (a soma dos buckets contaria a
+    // mesma pessoa em dias diferentes).
+    const totalRows = await this.prisma.$queryRaw<{ count: number }[]>`
+      SELECT count(DISTINCT "userId")::int AS count
+      FROM "predictions"
+      WHERE (("createdAt" AT TIME ZONE 'UTC') AT TIME ZONE ${TZ}) >= ${from}::date
+        AND (("createdAt" AT TIME ZONE 'UTC') AT TIME ZONE ${TZ}) < (${to}::date + interval '1 day')
+    `;
+    const total = Number(totalRows[0]?.count ?? 0);
+    return { granularity, from, to, total, points };
+  }
+
+  /** Resolve TZ + granularidade + intervalo [from,to] (default = mês atual) + a
+   * máscara do bucket. Compartilhado pelas séries de palpites e de palpiteiros. */
+  private resolveSeriesRange(
+    fromRaw?: string,
+    toRaw?: string,
+    granularityRaw?: string,
+    tz: string = APP_TIMEZONE,
+  ): {
+    TZ: string;
+    granularity: SeriesGranularity;
+    from: string;
+    to: string;
+    fmtMask: string;
+  } {
+    const TZ = tz || APP_TIMEZONE;
+    const granularity: SeriesGranularity =
+      granularityRaw === 'hour' ||
+      granularityRaw === 'week' ||
+      granularityRaw === 'month'
+        ? granularityRaw
+        : 'day';
+    const isDate = (s?: string): s is string => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: TZ }); // YYYY-MM-DD
+    const to = isDate(toRaw) ? toRaw : today;
+    const from = isDate(fromRaw) ? fromRaw : `${to.slice(0, 8)}01`;
+    const fmtMask = granularity === 'hour' ? 'YYYY-MM-DD HH24:00' : 'YYYY-MM-DD';
+    return { TZ, granularity, from, to, fmtMask };
   }
 
   /**

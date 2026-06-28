@@ -41,6 +41,18 @@ export class AdminDashboardController {
     return this.dashboard.predictionsSeries(from, to, granularity, admin.timezone);
   }
 
+  // Série de PESSOAS distintas que palpitaram no tempo (mesmos params da série de
+  // palpites). total = usuários únicos no período inteiro.
+  @Get('predictors-series')
+  predictorsSeries(
+    @CurrentUser() admin: SafeUser,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('granularity') granularity?: string,
+  ): Promise<PredictionsSeries> {
+    return this.dashboard.predictorsSeries(from, to, granularity, admin.timezone);
+  }
+
   // Série de gasto diário com geração de conteúdo (US$). from/to = 'YYYY-MM-DD'
   // (inclusivo). Sem params → mês atual.
   @Get('spend-series')
