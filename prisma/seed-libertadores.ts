@@ -233,18 +233,68 @@ async function run(): Promise<void> {
       data: { seasonId: season.id, name: 'Mata-mata', format: 'KNOCKOUT', order: 2 },
     }));
 
-  // Knockout rounds (created on demand, cached).
-  const roundCache = new Map<string, string>();
-  async function knockoutRound(slug: string): Promise<string> {
-    if (roundCache.has(slug)) return roundCache.get(slug)!;
+  // Knockout rounds — ALL phases up front (Oitavas..Final) so a chave mostra o caminho
+  // inteiro mesmo antes de existirem os jogos das fases seguintes. (Libertadores não
+  // tem disputa de 3º lugar.)
+  const KO_ORDER = ['round-of-16', 'quarterfinals', 'semifinals', 'final'];
+  const roundIdBySlug = new Map<string, string>();
+  for (const slug of KO_ORDER) {
     const def = KNOCKOUT[slug];
-    const round =
+    const r =
       (await prisma.round.findFirst({ where: { stageId: koStage.id, name: def.name } })) ??
       (await prisma.round.create({
         data: { stageId: koStage.id, name: def.name, legs: def.legs, order: def.order },
       }));
-    roundCache.set(slug, round.id);
-    return round.id;
+    roundIdBySlug.set(slug, r.id);
+  }
+
+  // Ties (nós do bracket). Oitavas: concretas — agrupa os 2 jogos de cada confronto num
+  // tie com seus times. Fases seguintes: ties placeholder com rótulo "a definir" pra a
+  // chave renderizar o caminho todo. tieId/leg são setados nos jogos no loop abaixo.
+  const tieIdByEvent = new Map<string, string>();
+  const legByEvent = new Map<string, number>();
+  const r16 = koEvents.filter((e) => e.season!.slug === 'round-of-16');
+  const pairs = new Map<string, EspnEvent[]>();
+  for (const e of r16) {
+    const c = e.competitions[0];
+    const ids = [pick(c, 'home')?.team?.id, pick(c, 'away')?.team?.id].filter(Boolean).sort();
+    pairs.set(ids.join('-'), [...(pairs.get(ids.join('-')) ?? []), e]);
+  }
+  let tieOrder = 1;
+  for (const list of [...pairs.values()].sort((a, b) => a[0].date.localeCompare(b[0].date))) {
+    list.sort((a, b) => a.date.localeCompare(b.date));
+    const c = list[0].competitions[0];
+    const he = pick(c, 'home')?.team?.id;
+    const ae = pick(c, 'away')?.team?.id;
+    const homeTeamId = he ? (teamByEspn.get(he) ?? null) : null;
+    const awayTeamId = ae ? (teamByEspn.get(ae) ?? null) : null;
+    const round16 = roundIdBySlug.get('round-of-16')!;
+    const tie =
+      (await prisma.tie.findFirst({ where: { roundId: round16, order: tieOrder } })) ??
+      (await prisma.tie.create({ data: { roundId: round16, order: tieOrder, homeTeamId, awayTeamId } }));
+    await prisma.tie.update({ where: { id: tie.id }, data: { homeTeamId, awayTeamId } });
+    list.forEach((e, i) => {
+      tieIdByEvent.set(e.id, tie.id);
+      legByEvent.set(e.id, i + 1);
+    });
+    tieOrder++;
+  }
+  // Placeholder ties pras rodadas cujos jogos ainda não existem (TBD via rótulo).
+  const PLACEHOLDERS: [string, number, string][] = [
+    ['quarterfinals', 4, 'Classificado das oitavas'],
+    ['semifinals', 2, 'Classificado das quartas'],
+    ['final', 1, 'Classificado das semifinais'],
+  ];
+  for (const [slug, count, label] of PLACEHOLDERS) {
+    const roundId = roundIdBySlug.get(slug)!;
+    for (let i = 0; i < count; i++) {
+      const exists = await prisma.tie.findFirst({ where: { roundId, order: tieOrder } });
+      if (!exists)
+        await prisma.tie.create({
+          data: { roundId, order: tieOrder, homeSourceLabel: label, awaySourceLabel: label },
+        });
+      tieOrder++;
+    }
   }
 
   // 6. Stadiums (upsert by name+city) from ESPN venues.
@@ -277,22 +327,6 @@ async function run(): Promise<void> {
     if (eid) matchByEspn.set(eid, m);
   }
 
-  // Leg derivation for two-legged knockout ties: pair the (≤2) matches of the same
-  // round + team-set, order by date → leg 1 (ida) / 2 (volta).
-  const legOf = new Map<string, number>();
-  {
-    const ties = new Map<string, EspnEvent[]>();
-    for (const e of koEvents) {
-      if (KNOCKOUT[e.season!.slug!].legs < 2) continue;
-      const c = e.competitions[0];
-      const ids = [pick(c, 'home')?.team?.id, pick(c, 'away')?.team?.id].filter(Boolean).sort();
-      ties.set(`${e.season!.slug}:${ids.join('-')}`, [...(ties.get(`${e.season!.slug}:${ids.join('-')}`) ?? []), e]);
-    }
-    for (const list of ties.values()) {
-      list.sort((a, b) => a.date.localeCompare(b.date)).forEach((e, i) => legOf.set(e.id, i + 1));
-    }
-  }
-
   let created = 0;
   let updated = 0;
   let played = 0;
@@ -318,8 +352,9 @@ async function run(): Promise<void> {
       stageId: isGroup ? groupStage.id : koStage.id,
       groupId: isGroup && home?.team?.id ? (groupIdByEspnTeam.get(home.team.id) ?? null) : null,
       groupName: isGroup && home?.team?.id ? (groupLetterByEspnTeam.get(home.team.id) ?? null) : null,
-      roundId: isGroup ? null : await knockoutRound(slug),
-      leg: isGroup ? null : (legOf.get(e.id) ?? 1),
+      roundId: isGroup ? null : (roundIdBySlug.get(slug) ?? null),
+      tieId: isGroup ? null : (tieIdByEvent.get(e.id) ?? null),
+      leg: isGroup ? null : (legByEvent.get(e.id) ?? 1),
       kickoffAt: new Date(e.date),
       stadiumId: await stadiumId(c.venue),
       homeTeamId,
