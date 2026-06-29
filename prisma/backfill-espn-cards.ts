@@ -22,8 +22,10 @@ for (const line of readFileSync(join(__dirname, '..', '.env'), 'utf8').split('\n
 }
 
 const prisma = new PrismaClient();
-const SEASON_NAME = 'Campeonato Brasileiro Série A 2026';
-const ESPN_SLUG = 'bra.1';
+// Parametrizável (default = Brasileirão). Ex.: Libertadores →
+//   BACKFILL_SEASON='CONMEBOL Libertadores 2026' BACKFILL_SLUG='conmebol.libertadores'
+const SEASON_NAME = process.env.BACKFILL_SEASON ?? 'Campeonato Brasileiro Série A 2026';
+const ESPN_SLUG = process.env.BACKFILL_SLUG ?? 'bra.1';
 
 /** FIFA fair-play points for ONE player (single yellow −1; 2nd yellow −3; red −4). */
 function playerFairPlay(yellows: number, reds: number): number {
