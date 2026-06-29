@@ -1,19 +1,17 @@
 /**
- * Seeds the CONMEBOL Libertadores 2026 from the ESPN public scoreboard:
- * Competition (conmebol.libertadores) → Season → Stage "Fase de Grupos" (GROUPS) +
- * Stage "Mata-mata" (KNOCKOUT) → Rounds (Oitavas/Quartas/Semis/Final) → Matches.
+ * Seeds the CONMEBOL Sudamericana 2026 from the ESPN public scoreboard:
+ * Competition (conmebol.sudamericana) → Season → Stage "Fase de Grupos" (GROUP) +
+ * Stage "Mata-mata" (KNOCKOUT) → Rounds (preliminar/playoffs/oitavas..final).
  * Idempotent: matches are keyed by their ESPN event id, so re-runs update in place
- * and pick up newly-published fixtures (e.g. quarterfinals once the R16 resolves).
+ * and pick up newly-published fixtures (e.g. R16 once the playoffs resolve).
  *
- *   ts-node --project prisma/tsconfig.seed.json prisma/seed-libertadores.ts
- *   DRY_RUN=1 ts-node ... prisma/seed-libertadores.ts   # fetch + map, NO DB writes
+ *   ts-node --project prisma/tsconfig.seed.json prisma/seed-copa-sudamericana.ts
+ *   DRY_RUN=1 ts-node ... prisma/seed-copa-sudamericana.ts   # fetch + map, no writes
  *
- * Source: ESPN owns BOTH structure and live scores for this competition (the live
- * robot already polls by the Competition's espn.slug). Unlike the Brasileirão seed
- * (ge.globo), there's no round-number gap — phases come from event.season.slug and
- * the knockout round from the same. Clubs must already exist (seed-clubs.ts
- * south-america) — verified all 32 group+R16 clubs are present; a missing one is
- * reported rather than created (it would lack ESPN keys and break live ingestion).
+ * Mirrors the Libertadores seed. Structure: 1ª fase preliminar (jogo único) → grupos
+ * (8 grupos A–H) → Playoffs do mata-mata (ida/volta) → oitavas/quartas/semis → final
+ * (jogo único). Clubs are pre-seeded (seed-clubs south-america) — all present; a
+ * missing one is reported rather than created.
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -45,7 +43,7 @@ const s3 = new S3Client({
 const BUCKET = process.env.STORAGE_BUCKET ?? '';
 const PUBLIC = (process.env.STORAGE_PUBLIC_BASE_URL ?? '').replace(/\/$/, '');
 
-const ESPN_SLUG = 'conmebol.libertadores';
+const ESPN_SLUG = 'conmebol.sudamericana';
 const SCOREBOARD = `https://site.api.espn.com/apis/site/v2/sports/soccer/${ESPN_SLUG}/scoreboard`;
 
 /**
@@ -81,22 +79,23 @@ async function competitionLogos(): Promise<{ logoUrl: string | null; logoUrlDark
   };
 }
 
-// Phases we ingest (event.season.slug). The qualifying rounds (first/second/third
-// stage) come BEFORE the group stage and are two-legged; their clubs are all
-// already in the catalog. They live in the knockout stage with low orders so the
-// bracket shows the full path. The Libertadores final is single-leg.
+// Phases we ingest (event.season.slug). The 1ª fase preliminar (single-leg) comes
+// BEFORE the group stage; the "Playoffs do mata-mata" sits between groups and the
+// round of 16 (group runners-up + Libertadores third-placed teams). They live in the
+// knockout stage with low orders; the bracket is reordered chronologically in the
+// front. The Sudamericana final is single-leg.
 const GROUP_SLUG = 'group-stage';
 const KNOCKOUT: Record<string, { name: string; legs: number; order: number; ties: number }> = {
-  'first-stage': { name: '1ª fase preliminar', legs: 2, order: 1, ties: 0 },
-  'second-stage': { name: '2ª fase preliminar', legs: 2, order: 2, ties: 0 },
-  'third-stage': { name: '3ª fase preliminar', legs: 2, order: 3, ties: 0 },
-  'round-of-16': { name: 'Oitavas de final', legs: 2, order: 4, ties: 8 },
-  quarterfinals: { name: 'Quartas de final', legs: 2, order: 5, ties: 4 },
-  semifinals: { name: 'Semifinais', legs: 2, order: 6, ties: 2 },
-  final: { name: 'Final', legs: 1, order: 7, ties: 1 },
+  'first-stage': { name: '1ª fase preliminar', legs: 1, order: 1, ties: 0 },
+  'knockout-round-playoffs': { name: 'Playoffs do mata-mata', legs: 2, order: 2, ties: 8 },
+  'round-of-16': { name: 'Oitavas de final', legs: 2, order: 3, ties: 8 },
+  quarterfinals: { name: 'Quartas de final', legs: 2, order: 4, ties: 4 },
+  semifinals: { name: 'Semifinais', legs: 2, order: 5, ties: 2 },
+  final: { name: 'Final', legs: 1, order: 6, ties: 1 },
 };
-const KO_SLUGS = ['first-stage', 'second-stage', 'third-stage', 'round-of-16', 'quarterfinals', 'semifinals', 'final'];
+const KO_SLUGS = ['first-stage', 'knockout-round-playoffs', 'round-of-16', 'quarterfinals', 'semifinals', 'final'];
 const SOURCE_LABEL: Record<string, string> = {
+  'round-of-16': 'Classificado dos playoffs',
   quarterfinals: 'Classificado das oitavas',
   semifinals: 'Classificado das quartas',
   final: 'Classificado das semifinais',
@@ -169,7 +168,7 @@ async function fetchGroups(): Promise<{ letter: string; order: number; espnTeamI
 }
 
 async function run(): Promise<void> {
-  console.log(`Seeding CONMEBOL Libertadores 2026 (ESPN)${DRY ? ' — DRY RUN' : ''}…`);
+  console.log(`Seeding CONMEBOL Sudamericana 2026 (ESPN)${DRY ? ' — DRY RUN' : ''}…`);
 
   // 1. Pull the whole season in quarter-ish ranges and dedupe by event id. Keep only
   //    the group stage + knockout (skip qualifiers).
@@ -233,9 +232,9 @@ async function run(): Promise<void> {
     create: {
       sportId: sport.id,
       // Short name, matching the other competitions ("Copa do Mundo", "Brasileirão").
-      name: 'Libertadores',
+      name: 'Sudamericana',
       slug: ESPN_SLUG,
-      urlSlug: 'libertadores',
+      urlSlug: 'sudamericana',
       type: 'LEAGUE_CUP',
       confederation: 'CONMEBOL',
       externalIds: { espn: { slug: ESPN_SLUG } },
@@ -250,11 +249,11 @@ async function run(): Promise<void> {
   const startDate = events.length ? dayUtc(events[0].date) : null;
   const endDate = events.length ? dayUtc(events[events.length - 1].date) : null;
 
-  // 4. Season 2026 (idempotent by name — "Libertadores 2026", como está em prod/dev).
+  // 4. Season 2026 (idempotent by name).
   const seasonData = {
     competitionId: competition.id,
-    name: 'Libertadores 2026',
-    slug: 'libertadores-2026',
+    name: 'Sudamericana 2026',
+    slug: 'sudamericana-2026',
     seasonLabel: '2026',
     format: 'GROUPS_KNOCKOUT' as const,
     status: 'ONGOING' as const,
@@ -293,10 +292,15 @@ async function run(): Promise<void> {
       groupLetterByEspnTeam.set(espnId, g.letter);
     }
   }
-  // Top 2 of each group advance to the knockout (classification band for the table).
+  // Group winner goes straight to the round of 16; runner-up drops to the playoffs.
   await prisma.stage.update({
     where: { id: groupStage.id },
-    data: { zones: [{ from: 1, to: 2, label: 'Classificados às oitavas', tone: 'green' }] },
+    data: {
+      zones: [
+        { from: 1, to: 1, label: 'Classificado às oitavas', tone: 'green' },
+        { from: 2, to: 2, label: 'Vai aos playoffs', tone: 'blue' },
+      ],
+    },
   });
 
   const koStage =
@@ -444,7 +448,7 @@ async function run(): Promise<void> {
   }
 
   console.log(
-    `✓ ${competition.name} 2026 — ${teamByEspn.size} clubes, ${events.length} jogos (${created} criados, ${updated} atualizados, ${played} encerrados).`,
+    `✓ ${competition.name} 2026 — ${espnIds.length} clubes, ${events.length} jogos (${created} criados, ${updated} atualizados, ${played} encerrados).`,
   );
 }
 

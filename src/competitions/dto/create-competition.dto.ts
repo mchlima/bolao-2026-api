@@ -19,8 +19,10 @@ export class CreateCompetitionDto {
   @IsString()
   @MinLength(1)
   @MaxLength(60)
-  @Matches(/^[a-z0-9.\-]+$/, {
-    message: 'slug deve conter apenas minúsculas, números, ponto e hífen.',
+  // Mirrors the ESPN league slug, which can contain underscores (e.g.
+  // "bra.copa_do_brazil"), so allow them alongside dot and hyphen.
+  @Matches(/^[a-z0-9._\-]+$/, {
+    message: 'slug deve conter apenas minúsculas, números, ponto, underscore e hífen.',
   })
   slug!: string;
 
