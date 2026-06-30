@@ -17,6 +17,11 @@ export interface EspnEvent {
   /** FIFA fair-play points (≤ 0) keyed by team abbreviation — the disciplinary
    * tiebreak input, computed per-player from the event's card sequence. */
   fairPlay: Record<string, number>;
+  /** Penalty-shootout score keyed by team abbreviation — present only when a
+   * knockout tie went to spot-kicks (ESPN's competitor.shootoutScore). Empty
+   * otherwise. Lets the caller persist homePenalties/awayPenalties so the slot
+   * resolver can pick the winner of a level 90'/ET tie. */
+  shootout: Record<string, number>;
   /** Pre-match 1X2 win probability from the scoreboard betting odds, de-vigged.
    * null when the book hasn't priced the game yet. See parseScoreboardOdds. */
   odds: EspnOdds | null;
@@ -817,6 +822,7 @@ export class EspnService {
       const comp = ev.competitions?.[0];
       if (!comp) continue;
       const scores: Record<string, number> = {};
+      const shootout: Record<string, number> = {};
       const idToAbbr: Record<string, string> = {};
       let homeAbbr: string | undefined;
       let awayAbbr: string | undefined;
@@ -824,6 +830,11 @@ export class EspnService {
         const abbr = c.team?.abbreviation;
         if (!abbr) continue;
         scores[abbr] = Number.parseInt(c.score ?? '0', 10) || 0;
+        // Shootout score is present only when the tie went to spot-kicks.
+        if (c.shootoutScore != null && c.shootoutScore !== '') {
+          const sv = Number.parseInt(String(c.shootoutScore), 10);
+          if (Number.isFinite(sv)) shootout[abbr] = sv;
+        }
         if (c.team?.id) idToAbbr[String(c.team.id)] = abbr;
         if (c.homeAway === 'home') homeAbbr = abbr;
         else if (c.homeAway === 'away') awayAbbr = abbr;
@@ -839,6 +850,7 @@ export class EspnService {
         abbrs: Object.keys(scores),
         cards,
         fairPlay,
+        shootout,
         odds: parseScoreboardOdds(comp, homeAbbr, awayAbbr),
       });
     }
@@ -1081,6 +1093,7 @@ interface EspnScoreboard {
     competitions?: Array<{
       competitors?: Array<{
         score?: string;
+        shootoutScore?: string | number;
         homeAway?: string;
         team?: { id?: string | number; abbreviation?: string };
       }>;

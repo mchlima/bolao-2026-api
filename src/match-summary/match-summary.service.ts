@@ -212,6 +212,8 @@ export class MatchSummaryService {
         awayTeamId: true,
         homeScore: true,
         awayScore: true,
+        homePenalties: true,
+        awayPenalties: true,
         homeYellow: true,
         homeRed: true,
         awayYellow: true,
@@ -259,6 +261,7 @@ export class MatchSummaryService {
     let clockChanged = false;
     let statusChanged = false;
     let cardsChanged = false;
+    let penaltiesChanged = false;
     let lineupChanged = false;
     let lineupJustAppeared = false; // 0 → N entries: the lineup was first published
     let eventsChanged = false;
@@ -481,6 +484,27 @@ export class MatchSummaryService {
         }
       }
 
+      // Penalty shootout (knockout): ESPN ships shootoutScore per side only once the
+      // tie goes to spot-kicks, and it climbs kick-by-kick (monotonic, never drops).
+      // We persist it LIVE ('in') as well as at the settle ('post') so the running
+      // tally shows during the shootout. The winner is NOT picked from it here — the
+      // slot resolver only fires on FINISHED (below), so a live tally can't promote a
+      // team early.
+      if (sb && (sbState === 'in' || sbState === 'post')) {
+        const hp = homeCode ? sb.shootout[homeCode] : undefined;
+        const ap = awayCode ? sb.shootout[awayCode] : undefined;
+        if (hp !== undefined && ap !== undefined) {
+          if (hp !== match.homePenalties) {
+            matchData.homePenalties = hp;
+            penaltiesChanged = true;
+          }
+          if (ap !== match.awayPenalties) {
+            matchData.awayPenalties = ap;
+            penaltiesChanged = true;
+          }
+        }
+      }
+
       // Clock: prefer the summary header. While LIVE, ESPN freezes the clock at
       // half-time (statusName HALFTIME) → "Intervalo"; but the events feed leads the
       // header out of the break, so once a 2nd-half event has landed (period ≥ 2) show
@@ -534,7 +558,14 @@ export class MatchSummaryService {
     }
 
     // A flip to FINISHED may decide a group or feed a knockout slot — re-resolve.
-    if (matchData.status === 'FINISHED') {
+    // Also re-resolve when the shootout score lands on an ALREADY-finished match: the
+    // settle can arrive a tick after the FINISHED flip, so without this the penalty
+    // winner would never be picked. A live ('in') penalty tick must NOT resolve (the
+    // match isn't over) — hence the match.status guard, not bare penaltiesChanged.
+    if (
+      matchData.status === 'FINISHED' ||
+      (penaltiesChanged && match.status === 'FINISHED')
+    ) {
       try {
         await this.resolver.resolveSeason(match.seasonId);
       } catch (e) {
@@ -550,7 +581,8 @@ export class MatchSummaryService {
       scoreChanged ||
       clockChanged ||
       statusChanged ||
-      cardsChanged
+      cardsChanged ||
+      penaltiesChanged
     ) {
       const rooms = [`match:${matchId}`];
       // Everything but a bare clock tick also drives the tournament-wide views.
@@ -559,7 +591,8 @@ export class MatchSummaryService {
         eventsChanged ||
         scoreChanged ||
         statusChanged ||
-        cardsChanged
+        cardsChanged ||
+        penaltiesChanged
       )
         rooms.push(`tournament:${match.seasonId}`);
       this.events.emit(...rooms);
